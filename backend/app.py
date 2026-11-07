@@ -530,6 +530,16 @@ def create_paypal_invoice():
         print("PAYPAL RESPONSE HEADERS:", dict(response.headers), flush=True)
         print("PAYPAL RESPONSE BODY:", repr(response.text), flush=True)
         invoice_id = paypal_data.get("id")
+        paypal_data = response.json()
+
+        paypal_data = response.json()
+
+        invoice_id = paypal_data.get("id")
+
+        if not invoice_id:
+            invoice_url = paypal_data.get("href", "")
+            invoice_id = invoice_url.rstrip("/").split("/")[-1]
+
         if not invoice_id:
             raise ValueError("PayPal did not return an invoice ID")
 
