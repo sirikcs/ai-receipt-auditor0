@@ -1,260 +1,1027 @@
-
-
-from flask import Flask, jsonify, request
-import pandas as pd
+       
 import os
-import time
+import re
+import csv
+import json
+import sqlite3
+import requests
+
+from decimal import Decimal, InvalidOperation
+from urllib.parse import urlparse
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from google import genai
-from google.genai import errors
+
+
+# =========================================================
+# CONFIGURATION
+# =========================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = Flask(__name__)
 
-# Load environment variables
-load_dotenv()
+app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
 
-# Get Gemini API key
-api_key = os.getenv("GEMINI_API_KEY")
+PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
+PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET")
+PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID")
 
-if not api_key:
-    raise ValueError("GEMINI_API_KEY is missing from .env file")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
-# Initialize Gemini client
-client = genai.Client(api_key=api_key)
+PAYPAL_BASE_URL = "https://api-m.sandbox.paypal.com"
 
-
-# HOME ROUTE
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({
-        "message": "AI Receipt Auditor Backend is running!"
-    })
+DATABASE_PATH = os.path.join(BASE_DIR, "receipt_auditor.db")
 
 
-# HEALTH CHECK
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({
-        "status": "healthy"
-    })
+# =========================================================
+# DATABASE INITIALIZATION
+# =========================================================
+
+def get_db_connection():
+    conn = sqlite3.connect(DATABASE_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
-# ANALYZE WORK HOURS
-@app.route("/api/analyze-hours", methods=["POST"])
-def analyze_hours():
-    if "file" not in request.files:
-        return jsonify({"error": "Please upload a CSV file"}), 400
+def init_db():
+
+    conn = get_db_connection()
 
     try:
-        df = pd.read_csv(request.files["file"])
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS invoices (
+                invoice_id TEXT PRIMARY KEY,
+                client_email TEXT,
+                freelancer_name TEXT,
+                amount REAL,
+                currency TEXT,
+                invoice_status TEXT DEFAULT 'DRAFT',
+                payment_status TEXT DEFAULT 'UNPAID',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
-        if "hours" not in df.columns or "task" not in df.columns:
-            return jsonify({
-                "error": "CSV must contain 'task' and 'hours' columns"
-            }), 400
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS processed_webhooks (
+                event_id TEXT PRIMARY KEY,
+                event_type TEXT,
+                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
-        df["hours"] = pd.to_numeric(df["hours"], errors="coerce")
+        conn.commit()
 
-        if df["hours"].isna().any() or (df["hours"] < 0).any():
-            return jsonify({
-                "error": "Hours must contain valid non-negative numbers"
-            }), 400
+        print("DATABASE INITIALIZED SUCCESSFULLY", flush=True)
 
-        return jsonify({
-            "total_hours": float(df["hours"].sum()),
-            "work_entries": len(df),
-            "tasks": df["task"].astype(str).tolist()
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    finally:
+        conn.close()
 
 
-# ANALYZE CONTRACT
-@app.route("/api/analyze-contract", methods=["POST"])
-def analyze_contract():
-    if "file" not in request.files:
-        return jsonify({"error": "Please upload a CSV file"}), 400
+def save_invoice_to_db(
+    invoice_id,
+    client_email,
+    freelancer_name,
+    amount,
+    currency,
+    status="DRAFT"
+):
+
+    conn = get_db_connection()
 
     try:
-        df = pd.read_csv(request.files["file"])
+        conn.execute("""
+            INSERT INTO invoices (
+                invoice_id,
+                client_email,
+                freelancer_name,
+                amount,
+                currency,
+                invoice_status,
+                payment_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'UNPAID')
 
-        if "hours" not in df.columns:
-            return jsonify({
-                "error": "CSV must contain an 'hours' column"
-            }), 400
+            ON CONFLICT(invoice_id) DO UPDATE SET
+                client_email = excluded.client_email,
+                freelancer_name = excluded.freelancer_name,
+                amount = excluded.amount,
+                currency = excluded.currency,
+                invoice_status = excluded.invoice_status
+        """, (
+            invoice_id,
+            client_email,
+            freelancer_name,
+            amount,
+            currency,
+            status
+        ))
 
-        df["hours"] = pd.to_numeric(df["hours"], errors="coerce")
+        conn.commit()
 
-        if df["hours"].isna().any() or (df["hours"] < 0).any():
-            return jsonify({
-                "error": "Hours must contain valid non-negative numbers"
-            }), 400
+    finally:
+        conn.close()
 
-        estimated_hours = float(request.form.get("estimated_hours", 0))
-        agreed_amount = float(request.form.get("agreed_amount", 0))
 
-        if estimated_hours < 0 or agreed_amount < 0:
-            return jsonify({
-                "error": "Contract values cannot be negative"
-            }), 400
+def update_invoice_status(invoice_id, invoice_status=None, payment_status=None):
 
-        actual_hours = float(df["hours"].sum())
-        difference = actual_hours - estimated_hours
+    conn = get_db_connection()
 
-        hourly_rate = (
-            agreed_amount / estimated_hours
-            if estimated_hours > 0 else None
+    try:
+        conn.execute("""
+            INSERT OR IGNORE INTO invoices (invoice_id)
+            VALUES (?)
+        """, (invoice_id,))
+
+        if invoice_status is not None:
+            conn.execute("""
+                UPDATE invoices
+                SET invoice_status = ?
+                WHERE invoice_id = ?
+            """, (invoice_status, invoice_id))
+
+        if payment_status is not None:
+            conn.execute("""
+                UPDATE invoices
+                SET payment_status = ?
+                WHERE invoice_id = ?
+            """, (payment_status, invoice_id))
+
+        conn.commit()
+
+    finally:
+        conn.close()
+
+
+# =========================================================
+# PAYPAL ACCESS TOKEN
+# =========================================================
+
+def get_paypal_access_token():
+
+    if not PAYPAL_CLIENT_ID or not PAYPAL_CLIENT_SECRET:
+        raise ValueError("PayPal credentials are missing from .env")
+
+    response = requests.post(
+        f"{PAYPAL_BASE_URL}/v1/oauth2/token",
+        auth=(PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET),
+        data={"grant_type": "client_credentials"},
+        headers={
+            "Accept": "application/json",
+            "Accept-Language": "en_US"
+        },
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    return response.json()["access_token"]
+
+
+def paypal_headers(access_token):
+
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+
+
+# =========================================================
+# GEMINI API
+# =========================================================
+
+def analyze_with_gemini(prompt):
+
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY is missing from .env")
+
+    url = (
+        "https://generativelanguage.googleapis.com/"
+        f"v1beta/models/{GEMINI_MODEL}:generateContent"
+    )
+
+    response = requests.post(
+        url,
+        params={"key": GEMINI_API_KEY},
+        json={
+            "contents": [{
+                "parts": [{"text": prompt}]
+            }]
+        },
+        timeout=90
+    )
+
+    response.raise_for_status()
+
+    result = response.json()
+
+    return result["candidates"][0]["content"]["parts"][0]["text"]
+
+
+# =========================================================
+# CONTRACT PDF ANALYSIS
+# =========================================================
+
+@app.route("/api/analyze-contract-pdf", methods=["POST"])
+def analyze_contract_pdf():
+
+    uploaded_file = request.files.get("file")
+
+    if uploaded_file is None:
+        uploaded_file = request.files.get("pdf")
+
+    if uploaded_file is None:
+        return jsonify({"error": "Please upload a PDF file"}), 400
+
+    if not uploaded_file.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "Only PDF files are supported"}), 400
+
+    try:
+        from pypdf import PdfReader
+        import io
+
+        pdf = PdfReader(io.BytesIO(uploaded_file.read()))
+
+        contract_text = "\n".join(
+            page.extract_text() or ""
+            for page in pdf.pages
         )
 
-        if difference > 0:
-            status = "Over estimate"
-        elif difference < 0:
-            status = "Under estimate"
-        else:
-            status = "As estimated"
-
-        return jsonify({
-            "actual_hours": actual_hours,
-            "estimated_hours": estimated_hours,
-            "agreed_amount": agreed_amount,
-            "hours_difference": difference,
-            "contract_hourly_rate": hourly_rate,
-            "status": status,
-            "work_entries": len(df),
-            "note": "Hours comparison is advisory, not a final judgement of payment fairness."
-        })
-
-    except ValueError:
-        return jsonify({
-            "error": "Please enter valid numeric contract details"
-        }), 400
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-# GEMINI AI ANALYSIS
-@app.route("/api/ai-analyze", methods=["POST"])
-def ai_analyze():
-    if "file" not in request.files:
-        return jsonify({"error": "Please upload a CSV file"}), 400
-
-    try:
-        df = pd.read_csv(request.files["file"])
-
-        if "hours" not in df.columns or "task" not in df.columns:
+        if not contract_text.strip():
             return jsonify({
-                "error": "CSV must contain 'task' and 'hours' columns"
+                "error": "Could not extract readable text from PDF"
             }), 400
-
-        df["hours"] = pd.to_numeric(df["hours"], errors="coerce")
-
-        if df["hours"].isna().any() or (df["hours"] < 0).any():
-            return jsonify({
-                "error": "Hours must contain valid non-negative numbers"
-            }), 400
-
-        estimated_hours = float(request.form.get("estimated_hours", 0))
-        agreed_amount = float(request.form.get("agreed_amount", 0))
-
-        if estimated_hours < 0 or agreed_amount < 0:
-            return jsonify({
-                "error": "Contract values cannot be negative"
-            }), 400
-
-        actual_hours = float(df["hours"].sum())
-        difference = actual_hours - estimated_hours
-
-        hourly_rate = (
-            agreed_amount / estimated_hours
-            if estimated_hours > 0 else None
-        )
-
-        work_log = df[["task", "hours"]].to_dict(orient="records")
 
         prompt = f"""
-You are an AI assistant for a freelancer invoice auditing application.
+        You are an AI contract auditor for freelancers.
 
-Analyze the freelancer's work log and contract information.
+        Analyze this contract and identify:
 
-WORK LOG:
-{work_log}
+        1. Payment amount and currency.
+        2. Payment deadlines.
+        3. Late payment penalties.
+        4. Missing payment terms.
+        5. Unfair or risky clauses.
+        6. Important obligations.
+        7. Recommendations for the freelancer.
 
-CONTRACT ESTIMATED HOURS: {estimated_hours}
-ACTUAL HOURS: {actual_hours}
-AGREED CONTRACT AMOUNT: {agreed_amount}
-CONTRACT HOURLY RATE: {hourly_rate}
+        Clearly distinguish facts from possible risks.
 
-Provide the following:
+        CONTRACT:
+        {contract_text[:30000]}
+        """
 
-1. A short summary of completed work.
-2. Whether actual hours are above, below, or equal to estimated hours.
-3. Tasks that may need clarification.
-4. Whether the invoice amount is consistent with the agreed contract.
-5. Suggestions for both freelancer and client.
-
-IMPORTANT RULES:
-- Treat the agreed contract as the primary reference.
-- Do not invent market rates or contract terms.
-- Extra hours do not automatically mean extra payment is owed.
-- Be neutral and fair to both parties.
-- Clearly state that your analysis is advisory and requires human review.
-"""
-
-        # GEMINI REQUEST WITH AUTOMATIC RETRIES
-        response = None
-
-        for attempt in range(3):
-            try:
-                response = client.models.generate_content(
-                    model="gemini-3.8-flash",
-                    contents=prompt
-                )
-                break
-
-            except errors.ServerError as e:
-                if attempt == 2:
-                    raise
-
-                print(
-                    f"Gemini temporarily unavailable. "
-                    f"Retry {attempt + 1}/3",
-                    flush=True
-                )
-
-                time.sleep(5 * (attempt + 1))
-
-        if response is None or not response.text:
-            return jsonify({
-                "error": "Gemini returned an empty response. Please try again."
-            }), 502
-
-        ai_analysis = response.text
+        analysis = analyze_with_gemini(prompt)
 
         return jsonify({
-            "actual_hours": actual_hours,
-            "estimated_hours": estimated_hours,
-            "agreed_amount": agreed_amount,
-            "hours_difference": difference,
-            "contract_hourly_rate": hourly_rate,
-            "ai_analysis": ai_analysis,
-            "note": "AI analysis is advisory. Review the contract and invoice before making payment decisions."
-        })
+            "status": "success",
+            "analysis": analysis
+        }), 200
 
-    except ValueError:
+    except ImportError:
         return jsonify({
-            "error": "Please enter valid numeric contract details"
-        }), 400
+            "error": "Install pypdf using: pip install pypdf"
+        }), 500
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "error": "Gemini API request failed",
+            "details": str(e)
+        }), 502
 
     except Exception as e:
-        print("AI ANALYSIS ERROR:", repr(e), flush=True)
+        print("CONTRACT ANALYSIS ERROR:", repr(e), flush=True)
 
         return jsonify({
-            "error": str(e)
+            "error": "Contract analysis failed",
+            "details": str(e)
         }), 500
 
 
-# START FLASK SERVER
+# =========================================================
+# CONTRACT + WORKLOG CSV ANALYSIS
+# =========================================================
+
+@app.route("/api/analyze-contract-worklog", methods=["POST"])
+def analyze_contract_worklog():
+
+    contract_file = (
+        request.files.get("contract")
+        or request.files.get("pdf")
+    )
+
+    worklog_file = (
+        request.files.get("worklog")
+        or request.files.get("csv")
+    )
+
+    if contract_file is None or worklog_file is None:
+        return jsonify({
+            "error": "Please upload both a contract PDF and worklog CSV"
+        }), 400
+
+    if not contract_file.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "Contract must be a PDF"}), 400
+
+    if not worklog_file.filename.lower().endswith(".csv"):
+        return jsonify({"error": "Worklog must be a CSV"}), 400
+
+    try:
+        from pypdf import PdfReader
+        import io
+
+        pdf = PdfReader(io.BytesIO(contract_file.read()))
+
+        contract_text = "\n".join(
+            page.extract_text() or ""
+            for page in pdf.pages
+        )
+
+        csv_text = worklog_file.read().decode("utf-8-sig")
+
+        rows = list(csv.DictReader(csv_text.splitlines()))
+
+        if not rows:
+            return jsonify({
+                "error": "Worklog CSV is empty or has no header"
+            }), 400
+
+        prompt = f"""
+        You are an AI receipt and freelancer invoice auditor.
+
+        Compare the contract with the worklog.
+
+        Check:
+        1. Contract payment terms.
+        2. Hours or work completed.
+        3. Whether the worklog matches the contract.
+        4. Possible billing discrepancies.
+        5. Missing or suspicious entries.
+        6. Payment risks and recommendations.
+
+        Do not invent missing information.
+
+        CONTRACT:
+        {contract_text[:20000]}
+
+        WORKLOG:
+        {json.dumps(rows[:500], ensure_ascii=False)}
+        """
+
+        analysis = analyze_with_gemini(prompt)
+
+        return jsonify({
+            "status": "success",
+            "analysis": analysis,
+            "worklog_entries": len(rows)
+        }), 200
+
+    except ImportError:
+        return jsonify({
+            "error": "Install pypdf using: pip install pypdf"
+        }), 500
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "error": "Gemini API request failed",
+            "details": str(e)
+        }), 502
+
+    except Exception as e:
+        print("WORKLOG ANALYSIS ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Contract and worklog analysis failed",
+            "details": str(e)
+        }), 500
+
+
+# =========================================================
+# PAYPAL CONNECTION TEST
+# =========================================================
+
+@app.route("/api/paypal/test", methods=["GET"])
+def paypal_test():
+
+    try:
+        token = get_paypal_access_token()
+
+        return jsonify({
+            "status": "success",
+            "message": "PayPal Sandbox connection successful"
+        }), 200
+
+    except Exception as e:
+        print("PAYPAL TEST ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "status": "error",
+            "message": "PayPal connection failed",
+            "details": str(e)
+        }), 502
+
+
+# =========================================================
+# CREATE PAYPAL DRAFT INVOICE
+# =========================================================
+
+@app.route("/api/paypal/create-invoice", methods=["POST"])
+def create_paypal_invoice():
+
+    data = request.get_json(silent=True) or {}
+
+    # HUMAN APPROVAL REQUIRED
+    if data.get("approved") is not True:
+        return jsonify({
+            "error": "Human approval is required before creating an invoice"
+        }), 400
+
+    client_email = str(data.get("client_email", "")).strip()
+    freelancer_name = str(data.get("freelancer_name", "")).strip()
+    description = str(data.get("description", "")).strip()
+    currency = str(data.get("currency", "USD")).upper()
+
+    try:
+        amount = Decimal(str(data.get("amount", "")))
+
+        if not amount.is_finite() or amount <= 0:
+            raise ValueError("Amount must be greater than zero")
+
+        if amount.as_tuple().exponent < -2:
+            raise ValueError("Amount cannot have more than two decimal places")
+
+    except (InvalidOperation, ValueError, TypeError):
+        return jsonify({
+            "error": "Enter a valid positive invoice amount"
+        }), 400
+
+    if not client_email or not re.fullmatch(
+        r"[^@\s]+@[^@\s]+\.[^@\s]+",
+        client_email
+    ):
+        return jsonify({"error": "Enter a valid client email"}), 400
+
+    if not freelancer_name or not description:
+        return jsonify({
+            "error": "Freelancer name and description are required"
+        }), 400
+
+    if currency != "USD":
+        return jsonify({
+            "error": "This version supports USD invoices only"
+        }), 400
+
+    try:
+        access_token = get_paypal_access_token()
+
+        name_parts = freelancer_name.split(maxsplit=1)
+
+        given_name = name_parts[0]
+        surname = name_parts[1] if len(name_parts) > 1 else ""
+
+        payload = {
+            "detail": {
+                "currency_code": currency,
+                "note": "Thank you for your business.",
+                "invoicer": {
+                    "name": {
+                        "given_name": given_name,
+                        "surname": surname
+                    }
+                }
+            },
+            "primary_recipients": [
+                {
+                    "billing_info": {
+                        "email_address": client_email
+                    }
+                }
+            ],
+            "items": [
+                {
+                    "name": description,
+                    "quantity": "1",
+                    "unit_amount": {
+                        "currency_code": currency,
+                        "value": format(amount, ".2f")
+                    }
+                }
+            ]
+        }
+
+        response = requests.post(
+            f"{PAYPAL_BASE_URL}/v2/invoicing/invoices",
+            headers=paypal_headers(access_token),
+            json=payload,
+            timeout=30
+        )
+
+        response.raise_for_status()
+
+        print("PAYPAL CREATE HTTP STATUS:", response.status_code, flush=True)
+        print("PAYPAL CREATE LOCATION:", response.headers.get("Location"), flush=True)
+        print("PAYPAL CREATE RAW RESPONSE:", response.text[:3000], flush=True)
+
+        paypal_data = response.json()
+        print("PAYPAL RESPONSE STATUS:", response.status_code, flush=True)
+        print("PAYPAL RESPONSE HEADERS:", dict(response.headers), flush=True)
+        print("PAYPAL RESPONSE BODY:", repr(response.text), flush=True)
+        invoice_id = paypal_data.get("id")
+        paypal_data = response.json()
+
+        paypal_data = response.json()
+
+        invoice_id = paypal_data.get("id")
+
+        if not invoice_id:
+            invoice_url = paypal_data.get("href", "")
+            invoice_id = invoice_url.rstrip("/").split("/")[-1]
+
+        if not invoice_id:
+            raise ValueError("PayPal did not return an invoice ID")
+
+        save_invoice_to_db(
+            invoice_id=invoice_id,
+            client_email=client_email,
+            freelancer_name=freelancer_name,
+            amount=float(amount),
+            currency=currency,
+            status="DRAFT"
+        )
+
+        return jsonify({
+            "status": "success",
+            "message": "Draft invoice created successfully",
+            "invoice_id": invoice_id,
+            "invoice_status": "DRAFT",
+            "currency": currency,
+            "amount": format(amount, ".2f"),
+            "paypal_response": paypal_data
+        }), 201
+
+    except requests.exceptions.RequestException as e:
+        print("PAYPAL CREATE INVOICE ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Could not create PayPal invoice",
+            "details": (
+                e.response.text[:1000]
+                if e.response is not None else str(e)
+            )
+        }), 502
+
+    except Exception as e:
+        print("CREATE INVOICE ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Invoice creation failed",
+            "details": str(e)
+        }), 500
+
+
+# =========================================================
+# GET PAYPAL INVOICE
+# =========================================================
+
+@app.route("/api/paypal/invoice/<invoice_id>", methods=["GET"])
+def get_paypal_invoice(invoice_id):
+
+    try:
+        access_token = get_paypal_access_token()
+
+        response = requests.get(
+            f"{PAYPAL_BASE_URL}/v2/invoicing/invoices/{invoice_id}",
+            headers=paypal_headers(access_token),
+            timeout=30
+        )
+
+        response.raise_for_status()
+
+        invoice = response.json()
+
+        status = invoice.get("status")
+
+        if status in [
+            "DRAFT", "SENT", "PAID", "CANCELLED", "REFUNDED"
+        ]:
+            update_invoice_status(
+                invoice_id,
+                invoice_status=status,
+                payment_status=(
+                    "PAID" if status == "PAID"
+                    else "REFUNDED" if status == "REFUNDED"
+                    else None
+                )
+            )
+
+        return jsonify({
+            "status": "success",
+            "invoice": invoice
+        }), 200
+
+    except requests.exceptions.RequestException as e:
+        print("GET PAYPAL INVOICE ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Could not retrieve PayPal invoice",
+            "details": (
+                e.response.text[:1000]
+                if e.response is not None else str(e)
+            )
+        }), 502
+
+    except Exception as e:
+        print("GET INVOICE ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Invoice retrieval failed",
+            "details": str(e)
+        }), 500
+
+
+# =========================================================
+# SEND PAYPAL INVOICE
+# =========================================================
+
+@app.route("/api/paypal/send-invoice/<invoice_id>", methods=["POST"])
+def send_paypal_invoice(invoice_id):
+
+    data = request.get_json(silent=True) or {}
+
+    # HUMAN APPROVAL REQUIRED
+    if data.get("approved") is not True:
+        return jsonify({
+            "error": "Human approval is required before sending the invoice"
+        }), 400
+
+    try:
+        access_token = get_paypal_access_token()
+
+        headers = paypal_headers(access_token)
+
+        check_response = requests.get(
+            f"{PAYPAL_BASE_URL}/v2/invoicing/invoices/{invoice_id}",
+            headers=headers,
+            timeout=30
+        )
+
+        check_response.raise_for_status()
+
+        invoice = check_response.json()
+
+        if invoice.get("status") != "DRAFT":
+            return jsonify({
+                "error": "Only draft invoices can be sent",
+                "current_status": invoice.get("status")
+            }), 400
+
+        response = requests.post(
+            f"{PAYPAL_BASE_URL}/v2/invoicing/invoices/{invoice_id}/send",
+            headers=headers,
+            json={
+                "send_to_invoicer": True
+            },
+            timeout=30
+        )
+
+        response.raise_for_status()
+
+        update_invoice_status(
+            invoice_id,
+            invoice_status="SENT"
+        )
+
+        return jsonify({
+            "status": "success",
+            "message": "Invoice sent successfully through PayPal",
+            "invoice_id": invoice_id,
+            "invoice_status": "SENT",
+            "paypal_response": (
+                response.json() if response.content else {}
+            )
+        }), 200
+
+    except requests.exceptions.RequestException as e:
+        print("PAYPAL SEND INVOICE ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Could not send PayPal invoice",
+            "details": (
+                e.response.text[:1000]
+                if e.response is not None else str(e)
+            )
+        }), 502
+
+    except Exception as e:
+        print("SEND INVOICE ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Invoice sending failed",
+            "details": str(e)
+        }), 500
+
+
+# =========================================================
+# PAYPAL WEBHOOK SIGNATURE VERIFICATION
+# =========================================================
+
+@app.route("/api/paypal/webhook", methods=["POST"])
+def paypal_webhook():
+
+    print("STEP 1: WEBHOOK ROUTE HIT", flush=True)
+
+    raw_body = request.get_data(as_text=True)
+    event = request.get_json(silent=True)
+
+    if not event:
+        return jsonify({"error": "Invalid webhook event"}), 400
+
+    print("STEP 2: EVENT RECEIVED", bool(event), flush=True)
+
+    event_id = event.get("id")
+    event_type = event.get("event_type")
+
+    print("STEP 3: EVENT TYPE:", event_type, flush=True)
+
+    if not PAYPAL_WEBHOOK_ID:
+        return jsonify({
+            "error": "PayPal webhook ID is missing from .env"
+        }), 500
+
+    # READ PAYPAL SIGNATURE HEADERS
+    auth_algo = request.headers.get("PAYPAL-AUTH-ALGO")
+    cert_url = request.headers.get("PAYPAL-CERT-URL")
+    transmission_id = request.headers.get("PAYPAL-TRANSMISSION-ID")
+    transmission_sig = request.headers.get("PAYPAL-TRANSMISSION-SIG")
+    transmission_time = request.headers.get("PAYPAL-TRANSMISSION-TIME")
+
+    required_headers = [
+        auth_algo,
+        cert_url,
+        transmission_id,
+        transmission_sig,
+        transmission_time
+    ]
+
+    print(
+        "STEP 4: REQUIRED HEADERS:",
+        [bool(value) for value in required_headers],
+        flush=True
+    )
+
+    if not all(required_headers):
+        return jsonify({
+            "error": "Missing PayPal signature headers"
+        }), 400
+
+    # ONLY ACCEPT HTTPS PAYPAL CERTIFICATE HOSTS
+    parsed_url = urlparse(cert_url)
+
+    allowed_hosts = {
+        "api.sandbox.paypal.com",
+        "api-m.sandbox.paypal.com",
+        "api-m.paypal.com",
+        "api.paypal.com"
+    }
+
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname not in allowed_hosts
+    ):
+        return jsonify({
+            "error": "Untrusted PayPal certificate URL"
+        }), 400
+
+    try:
+        print("STARTING PAYPAL SIGNATURE VERIFICATION", flush=True)
+
+        verification_payload = {
+            "auth_algo": auth_algo,
+            "cert_url": cert_url,
+            "transmission_id": transmission_id,
+            "transmission_sig": transmission_sig,
+            "transmission_time": transmission_time,
+            "webhook_id": PAYPAL_WEBHOOK_ID
+        }
+
+        # PRESERVE RAW EVENT BODY FOR PAYPAL VERIFICATION
+        verification_body = (
+            json.dumps(
+                verification_payload,
+                separators=(",", ":")
+            )[:-1]
+            + ',"webhook_event":'
+            + raw_body
+            + '}'
+        )
+
+        verification_response = requests.post(
+            f"{PAYPAL_BASE_URL}/v1/notifications/verify-webhook-signature",
+            data=verification_body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": (
+                    f"Bearer {get_paypal_access_token()}"
+                )
+            },
+            timeout=30
+        )
+
+        print(
+            "PAYPAL VERIFICATION HTTP STATUS:",
+            verification_response.status_code,
+            flush=True
+        )
+
+        verification_response.raise_for_status()
+
+        verification_result = verification_response.json()
+
+        print(
+            "PAYPAL VERIFICATION RESPONSE:",
+            verification_result,
+            flush=True
+        )
+
+        if verification_result.get("verification_status") != "SUCCESS":
+            return jsonify({
+                "error": "PayPal webhook signature verification failed"
+            }), 400
+
+        print(
+            "VERIFIED REAL PAYPAL WEBHOOK:",
+            event_type,
+            flush=True
+        )
+
+        if not event_id or not event_type:
+            return jsonify({
+                "error": "Webhook event ID or type is missing"
+            }), 400
+
+        # EXTRACT INVOICE ID
+        resource = event.get("resource", {})
+
+        invoice_id = (
+            resource.get("invoice", {}).get("id")
+            or resource.get("id")
+            or event.get("resource_id")
+        )
+
+        if not invoice_id:
+            return jsonify({
+                "error": "Invoice ID not found in webhook event"
+            }), 400
+
+        # EVENT STATUS MAPPING
+        status_map = {
+            "INVOICING.INVOICE.CREATED": ("DRAFT", None),
+            "INVOICING.INVOICE.SENT": ("SENT", None),
+            "INVOICING.INVOICE.PAID": ("PAID", "PAID"),
+            "INVOICING.INVOICE.CANCELLED": ("CANCELLED", None),
+            "INVOICING.INVOICE.REFUNDED": ("REFUNDED", "REFUNDED")
+        }
+
+        if event_type not in status_map:
+            return jsonify({
+                "status": "success",
+                "message": "Verified event; no invoice update required",
+                "event_type": event_type
+            }), 200
+
+        invoice_status, payment_status = status_map[event_type]
+
+        # ATOMIC DUPLICATE PROTECTION + STATUS UPDATE
+        conn = get_db_connection()
+
+        try:
+            cursor = conn.execute("""
+                INSERT OR IGNORE INTO processed_webhooks (
+                    event_id,
+                    event_type
+                )
+                VALUES (?, ?)
+            """, (event_id, event_type))
+
+            if cursor.rowcount == 0:
+                conn.rollback()
+
+                print("DUPLICATE WEBHOOK IGNORED:", event_id, flush=True)
+
+                return jsonify({
+                    "status": "success",
+                    "message": "Duplicate webhook ignored",
+                    "event_id": event_id
+                }), 200
+
+            conn.execute("""
+                INSERT OR IGNORE INTO invoices (invoice_id)
+                VALUES (?)
+            """, (invoice_id,))
+
+            if invoice_status is not None:
+                conn.execute("""
+                    UPDATE invoices
+                    SET invoice_status = ?
+                    WHERE invoice_id = ?
+                """, (invoice_status, invoice_id))
+
+            if payment_status is not None:
+                conn.execute("""
+                    UPDATE invoices
+                    SET payment_status = ?
+                    WHERE invoice_id = ?
+                """, (payment_status, invoice_id))
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            conn.close()
+
+        print(
+            "WEBHOOK PROCESSED SUCCESSFULLY:",
+            event_id,
+            event_type,
+            invoice_id,
+            flush=True
+        )
+
+        return jsonify({
+            "status": "success",
+            "message": "PayPal webhook verified and processed",
+            "event_id": event_id,
+            "event_type": event_type,
+            "invoice_id": invoice_id
+        }), 200
+
+    except requests.exceptions.RequestException as e:
+        print("PAYPAL WEBHOOK REQUEST ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Could not verify PayPal webhook"
+        }), 502
+
+    except Exception as e:
+        print("PAYPAL WEBHOOK ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Webhook processing failed"
+        }), 500
+
+
+# =========================================================
+# DATABASE INVOICE LIST (FOR TESTING)
+# =========================================================
+
+@app.route("/api/paypal/invoices", methods=["GET"])
+def list_invoices():
+
+    conn = get_db_connection()
+
+    try:
+        rows = conn.execute("""
+            SELECT *
+            FROM invoices
+            ORDER BY created_at DESC
+        """).fetchall()
+
+        return jsonify({
+            "status": "success",
+            "invoices": [dict(row) for row in rows]
+        }), 200
+
+    finally:
+        conn.close()
+
+
+# =========================================================
+# HEALTH CHECK
+# =========================================================
+
+@app.route("/health", methods=["GET"])
+def health():
+
+    return jsonify({
+        "status": "healthy"
+    }), 200
+
+
+# =========================================================
+# START FLASK
+# =========================================================
+
 if __name__ == "__main__":
-    app.run(debug=True, use_reloader=False)
+
+    init_db()
+
+    app.run(
+        debug=True,
+        port=5000
+    )
