@@ -5,3 +5,11 @@ backend/uploads/
 # Python cache files
 __pycache__/
 *.py[cod]
+# Local database
+backend/*.db
+backend/*.db-journal
+
+# Local test files
+test_contract.pdf
+test_contract.txt
+test_worklog.csv
