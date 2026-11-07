@@ -1,67 +1,132 @@
 # Backend API Documentation
 
-## AI Receipt Auditor for Freelancers
+# AI Receipt Auditor for Freelancers
 
-The backend is built using Python and Flask. It provides contract-hours analysis, AI-powered work-log analysis using Google Gemini, and PayPal Sandbox dispute retrieval.
+The backend is built using Python and Flask. It provides AI-powered contract analysis, work-log analysis using Google Gemini, PayPal Sandbox invoice management, webhook processing, and dispute retrieval and analysis.
 
 ## 1. Technologies Used
 
 - Python
 - Flask
-- Pandas
 - Google Gemini API
 - PayPal REST API
 - Requests
 - Python-dotenv
+- SQLite
+- pypdf
 
 ## 2. Backend Setup
 
-### Install dependencies
+### Activate the virtual environment
 
 From the project root:
 
-```bash
-& "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe" -m pip install -r backend/requirements.txt
+```powershell
+cd backend
+.\venv\Scripts\Activate.ps1
 ```
+
 ### Configure environment variables
 
 Create a `backend/.env` file:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.5-flash-lite
 PAYPAL_CLIENT_ID=your_paypal_sandbox_client_id
 PAYPAL_CLIENT_SECRET=your_paypal_sandbox_secret
 PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com
 ```
 
-Do not commit `.env` or expose API credentials.
+Never commit `.env` or expose API credentials.
 
 ### Start the Flask server
 
-```bash
-cd backend
-& "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe" app.py
+```powershell
+python app.py
 ```
 
 Server address: `http://127.0.0.1:5000`
 
-## 3. API Endpoints
+## 3. Contract and Work-Log APIs
 
-### GET /
+### POST `/api/analyze-contract-pdf`
 
-Checks whether the backend is running.
+Analyzes an uploaded contract PDF using Google Gemini.
 
-Example response:
+### POST `/api/analyze-contract-worklog`
 
-```json
-{
-  "message": "AI Receipt Auditor Backend is running!"
-}
-```
+Analyzes a CSV work log alongside contract information using Google Gemini.
 
-### GET /health
+Both endpoints are part of the contract-analysis functionality. Refer to the Flask route definitions for the exact request fields and validation requirements.
 
-Checks backend health.
+## 4. PayPal Invoice APIs
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/paypal/test` | Test PayPal Sandbox connection |
+| POST | `/api/paypal/create-invoice` | Create an invoice |
+| GET | `/api/paypal/invoice/<invoice_id>` | Retrieve invoice details |
+| POST | `/api/paypal/send-invoice/<invoice_id>` | Send an invoice |
+| GET | `/api/paypal/invoices` | Retrieve locally stored invoices |
+
+### Human approval
+
+Invoice creation and sending require explicit human approval.
+
+### Invoice status tracking
+
+The backend processes verified PayPal webhooks and updates invoice statuses in SQLite.
+
+Supported invoice statuses include:
+
+- DRAFT
+- SENT
+- PAID
+- CANCELLED
+- REFUNDED
+
+Duplicate webhook events are protected against repeated processing.
+
+## 5. PayPal Dispute APIs
+
+File: `backend/dispute_handler.py`
+
+The dispute handler provides PayPal Sandbox dispute retrieval and Gemini-powered analysis.
+
+### Available Python functions
+
+- `get_access_token()` – obtains a PayPal OAuth access token.
+- `list_disputes()` – retrieves disputes from the PayPal account.
+- `get_dispute_details(dispute_id)` – retrieves an individual dispute.
+- `analyze_dispute(dispute)` – extracts dispute information and generates AI-powered advice using Google Gemini.
+
+### Flask API endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/paypal/disputes` | Retrieve PayPal disputes |
+| GET | `/api/paypal/disputes/<dispute_id>` | Retrieve individual dispute details |
+| GET | `/api/paypal/disputes/<dispute_id>/analyze` | Retrieve and analyze a dispute using Gemini |
+
+### Gemini dispute analysis
+
+The AI analysis provides:
+
+1. Possible reasons for the dispute.
+2. Important information the freelancer should check.
+3. Documents and evidence that may help.
+4. Recommended next steps.
+
+The AI provides advisory information only. It does not guarantee a successful dispute outcome.
+
+**Important:** The current implementation retrieves and analyzes disputes. It does not submit evidence, respond to disputes, or resolve disputes automatically.
+
+## 6. Health Check
+
+### GET `/health`
+
+Checks whether the Flask backend is running.
 
 Example response:
 
@@ -71,112 +136,34 @@ Example response:
 }
 ```
 
-### POST /api/analyze-hours
+## 7. Testing Results
 
-Analyses a CSV work log and calculates the total number of hours worked.
-
-**Request:** `multipart/form-data`
-
-| Field | Type | Required |
-|---|---|---|
-| file | CSV file | Yes |
-
-The CSV file must contain these columns:
-
-| Column | Description |
-|---|---|
-| task | Description of the work performed |
-| hours | Time spent on the task (non-negative number) |
-
-**Example request (Windows PowerShell):**
-
-```powershell
-curl.exe -X POST `
-  -F "file=@C:\Users\user\OneDrive\Desktop\ai-receipt-auditor0\backend\test_worklog.csv" `
-  http://127.0.0.1:5000/api/analyze-hours
-```
-### POST /api/analyze-contract
-
-Compares actual work hours with estimated contract hours.
-
-Request: `multipart/form-data`
-
-| Field | Type | Example |
-|---|---|---|
-| file | CSV file | test_worklog.csv |
-| estimated_hours | Number | 10 |
-| agreed_amount | Number | 5000 |
-
-Example response:
-
-```json
-{
-  "actual_hours": 38.0,
-  "agreed_amount": 5000.0,
-  "contract_hourly_rate": 500.0,
-  "estimated_hours": 10.0,
-  "hours_difference": 28.0,
-  "note": "Hours comparison is advisory, not a final judgement of payment fairness.",
-  "status": "Over estimate",
-  "work_entries": 5
-}
-```
-
-### POST /api/ai-analyze
-
-Uses Google Gemini to analyse the work log and contract information.
-
-Request: `multipart/form-data`
-
-| Field | Type | Example |
-|---|---|---|
-| file | CSV file | test_worklog.csv |
-| estimated_hours | Number | 10 |
-| agreed_amount | Number | 5000 |
-
-The response contains the contract calculations and an `ai_analysis` field with the generated analysis.
-
-## 4. PayPal Dispute Handler
-
-File: `backend/dispute_handler.py`
-
-The dispute handler provides read-only PayPal Sandbox functionality.
-
-Functions:
-
-- get_access_token() - obtains a PayPal OAuth access token.
-- `list_disputes()` - retrieves up to 20 disputes per request. Pagination is not implemented.
-- `get_dispute_details(dispute_id)` – retrieves details for a specific dispute.
-- `analyze_dispute(dispute)` – extracts important dispute information and produces a review summary.
-- These functions are currently available as Python module functions and are not exposed as Flask API routes.
-
-PayPal API operations:
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| POST | `/v1/oauth2/token` | Obtain access token |
-| GET | `/v1/customer/disputes` | Retrieve disputes |
-| GET | `/v1/customer/disputes/{dispute_id}` | Retrieve individual dispute |
-
-The current implementation retrieves and analyses disputes. It does not submit dispute evidence, respond to disputes, or resolve them.
-
-## 5. Testing Results
-
-The following tests were performed locally:
+The following functionality has been tested locally:
 
 | Test | Result |
 |---|---|
-| Flask health endpoint | Passed |
-| Contract analysis endpoint | Passed |
-| Gemini AI analysis endpoint | Passed |
+| Flask startup | Passed |
+| Health endpoint | Passed |
+| Contract PDF analysis | Passed |
+| Contract and work-log AI analysis | Passed |
 | PayPal Sandbox authentication | Passed |
+| PayPal invoice creation | Passed |
+| PayPal invoice sending | Passed |
+| PayPal payment webhook verification | Passed |
+| Duplicate webhook protection | Passed |
+| SQLite invoice status updates | Passed |
+| PayPal dispute authentication | Passed |
 | PayPal dispute retrieval | Passed — zero disputes returned |
-| Dispute analysis function | Passed using sample test data |
+| Gemini dispute analysis | Passed using sample data |
+| Flask dispute-list endpoint | Passed |
+| Invalid dispute ID handling | Returned expected PayPal 404, handled by Flask |
 
-## 6. Important Notes
+## 8. Important Notes
 
 - Gemini analysis is advisory and requires human review.
-- Contract-hours comparison does not independently determine payment fairness.
 - PayPal operations currently use Sandbox credentials.
 - The Sandbox account returned zero disputes during testing.
-- No real payments or dispute-resolution actions are performed by the dispute handler.
+- Gemini dispute analysis was tested using sample dispute data, not a live dispute.
+- PayPal makes the final decisions on disputes.
+- No automatic dispute resolution or evidence submission is implemented.
+- API credentials must remain private and must never be pushed to GitHub.
