@@ -1,4 +1,8 @@
-       
+from dispute_handler import (
+    list_disputes,
+    get_dispute_details,
+    analyze_dispute
+)     
 import os
 import re
 import csv
@@ -1000,7 +1004,66 @@ def list_invoices():
     finally:
         conn.close()
 
+# =========================================================
+# PAYPAL DISPUTE APIs
+# =========================================================
 
+@app.route("/api/paypal/disputes", methods=["GET"])
+def get_paypal_disputes():
+
+    try:
+        disputes = list_disputes()
+
+        return jsonify({
+            "status": "success",
+            "disputes": disputes
+        }), 200
+
+    except Exception as e:
+        print("DISPUTE LIST ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Unable to retrieve PayPal disputes"
+        }), 500
+
+
+@app.route("/api/paypal/disputes/<dispute_id>", methods=["GET"])
+def get_paypal_dispute(dispute_id):
+
+    try:
+        dispute = get_dispute_details(dispute_id)
+
+        return jsonify({
+            "status": "success",
+            "dispute": dispute
+        }), 200
+
+    except Exception as e:
+        print("DISPUTE DETAILS ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Unable to retrieve dispute details"
+        }), 500
+
+
+@app.route("/api/paypal/disputes/<dispute_id>/analyze", methods=["GET"])
+def analyze_paypal_dispute(dispute_id):
+
+    try:
+        dispute = get_dispute_details(dispute_id)
+        analysis = analyze_dispute(dispute)
+
+        return jsonify({
+            "status": "success",
+            "analysis": analysis
+        }), 200
+
+    except Exception as e:
+        print("DISPUTE ANALYSIS ERROR:", repr(e), flush=True)
+
+        return jsonify({
+            "error": "Unable to analyze PayPal dispute"
+        }), 500
 # =========================================================
 # HEALTH CHECK
 # =========================================================

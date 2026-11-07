@@ -103,17 +103,63 @@ def get_dispute_details(dispute_id):
 
 
 def analyze_dispute(dispute):
-    """Extract important information from a dispute."""
+    """Analyze PayPal dispute using Google Gemini AI."""
+
+    import json
+
+    dispute_data = {
+        "dispute_id": dispute.get("dispute_id"),
+        "status": dispute.get("status"),
+        "reason": dispute.get("reason"),
+        "amount": dispute.get("dispute_amount", {}),
+        "stage": dispute.get("dispute_life_cycle_stage"),
+        "created_at": dispute.get("create_time"),
+        "seller_response_due": dispute.get("seller_response_due_date")
+    }
+
+    prompt = f"""
+    You are an AI assistant helping freelancers understand PayPal disputes.
+
+    Analyze this dispute:
+
+    {json.dumps(dispute_data, indent=2)}
+
+    Explain:
+    1. Why the dispute may have occurred.
+    2. What the freelancer should check.
+    3. What documents or evidence may help.
+    4. Recommended next steps.
+
+    Give practical advice.
+    Do not invent facts or guarantee a successful outcome.
+    """
+
+    load_dotenv(Path(__file__).with_name(".env"))
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is missing from backend/.env")
+
+    url = (
+        "https://generativelanguage.googleapis.com/"
+        f"v1beta/models/{model}:generateContent"
+    )
+
+    response = requests.post(
+        url,
+        params={"key": api_key},
+        json={"contents": [{"parts": [{"text": prompt}]}]},
+        timeout=90
+    )
+
+    response.raise_for_status()
+
+    result = response.json()
+    ai_analysis = result["candidates"][0]["content"]["parts"][0]["text"]
 
     return {
-        "dispute_id": dispute.get("dispute_id"),
-        "status": dispute.get("status", "Unknown"),
-        "reason": dispute.get("reason", "Not provided"),
-        "amount": dispute.get("dispute_amount", {}),
-        "stage": dispute.get("dispute_life_cycle_stage", "Unknown"),
-        "created_at": dispute.get("create_time"),
-        "summary": (
-            "Review the dispute details, contract and work records "
-            "before preparing a response."
-        )
+        **dispute_data,
+        "ai_analysis": ai_analysis
     }
