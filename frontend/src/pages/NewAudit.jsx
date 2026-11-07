@@ -10,14 +10,14 @@ import {
   ShieldCheck,
   BrainCircuit,
 } from "lucide-react";
-
-export default function NewAudit() {
+const API_URL = "http://127.0.0.1:5000";
+export default function NewAudit({ onComplete }) {
   const [contract, setContract] = useState(null);
   const [worklog, setWorklog] = useState(null);
   const [projectName, setProjectName] = useState("");
   const [clientName, setClientName] = useState("");
   const [amount, setAmount] = useState("");
-
+const [loading, setLoading] = useState(false);
   const FileUpload = ({ title, description, accept, file, setFile, icon: Icon }) => (
     <div className="upload-card">
       <div className="upload-card-heading">
@@ -48,11 +48,36 @@ export default function NewAudit() {
       )}
     </div>
   );
+const handleSubmit = async (e) => {
+  e.preventDefault();
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    alert("Your audit form is ready! AI analysis will be connected in a later step.");
-  };
+  if (!contract || !worklog) {
+    alert("Please upload both files");
+    return;
+  }
+
+  setLoading(true);
+  try {
+    const formData = new FormData();
+    formData.append("contract", contract);
+    formData.append("worklog", worklog);
+
+    const res = await fetch(`${API_URL}/api/analyze-contract-worklog`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || "Analysis failed");
+
+    console.log("AI RESULT:", data);
+    if (onComplete) onComplete(data);
+  } catch (err) {
+    alert("Error: " + err.message);
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="audit-page">
@@ -133,7 +158,7 @@ export default function NewAudit() {
             <FileUpload
               title="Client Agreement"
               description="Upload your signed contract or agreement."
-              accept=".pdf,.doc,.docx"
+              accept=".pdf"
               file={contract}
               setFile={setContract}
               icon={FileText}
@@ -142,7 +167,7 @@ export default function NewAudit() {
             <FileUpload
               title="Work Log"
               description="Upload your recorded project hours."
-              accept=".csv,.xlsx,.xls"
+              accept=".csv"
               file={worklog}
               setFile={setWorklog}
               icon={FileSpreadsheet}
@@ -156,9 +181,9 @@ export default function NewAudit() {
             Your documents stay ready for review.
           </div>
 
-          <button className="primary-button audit-submit" type="submit">
-            Continue to AI Analysis <ArrowRight size={18} />
-          </button>
+          <button className="primary-button audit-submit" type="submit" disabled={loading}>
+  {loading ? "Analyzing..." : "Continue to AI Analysis"} <ArrowRight size={18} />
+</button>
         </div>
       </form>
     </div>

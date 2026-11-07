@@ -12,7 +12,12 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-export default function AuditResults() {
+export default function AuditResults({ result }) {
+  const actualHours = result?.worklog_summary?.actual_hours;
+  const estimatedHours = result?.worklog_summary?.estimated_hours;
+  const agreedAmount = result?.payment_summary?.agreed_amount;
+  const currency = result?.payment_summary?.currency;
+  const aiText = result?.ai_analysis;
   return (
     <div className="results-page">
 
@@ -71,7 +76,7 @@ export default function AuditResults() {
             <div className="result-stat-icon purple"><Clock /></div>
             <div>
               <span>Recorded Work Hours</span>
-              <strong>40 Hours</strong>
+              <strong>{actualHours ?? "N/A"} Hours</strong>
             </div>
           </div>
 
@@ -79,7 +84,7 @@ export default function AuditResults() {
             <div className="result-stat-icon orange"><FileText /></div>
             <div>
               <span>Estimated Work Hours</span>
-              <strong>42 Hours</strong>
+              <strong>{estimatedHours ?? "N/A"} Hours</strong>
             </div>
           </div>
         </div>
@@ -98,7 +103,7 @@ export default function AuditResults() {
           <div className="comparison-row">
             <div>
               <span>Agreed Amount</span>
-              <strong>₹45,000</strong>
+              <strong>{agreedAmount != null ? `${currency || ""} ${agreedAmount}` : "N/A"}</strong>
             </div>
             <div>
               <span>Estimated Fair Value</span>
@@ -157,7 +162,11 @@ export default function AuditResults() {
           </div>
         </div>
       </section>
-
+{aiText && (
+  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, padding: "8px 4px" }}>
+    {aiText}
+  </div>
+)}
       <section className="result-panel recommendations-panel">
         <div className="result-panel-heading">
           <div>
