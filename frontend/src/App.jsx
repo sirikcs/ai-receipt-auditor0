@@ -307,6 +307,7 @@ function PlaceholderPage({ title }) {
 export default function App() {
   const [activePage, setActivePage] = useState("Dashboard");
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [auditResult, setAuditResult] = useState(null);
 
   return (
     <div className="app-layout">
@@ -388,9 +389,14 @@ export default function App() {
 {activePage === "Dashboard" ? (
   <Dashboard />
 ) : activePage === "New AI Audit" ? (
-  <NewAudit />
+  <NewAudit 
+  onComplete={(data) => {
+    setAuditResult(data);
+    setActivePage("Audit Reports");
+  }}
+/>
 ) : activePage === "Audit Reports" ? (
-  <AuditResults />
+  <AuditResults result={auditResult} />
 ) : activePage === "Invoices & Payments" ? (
   <Invoices />
 ) : activePage === "Disputes" ? (
