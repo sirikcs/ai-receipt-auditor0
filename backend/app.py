@@ -113,14 +113,17 @@ def save_invoice_to_db(
                 payment_status
             )
             VALUES (?, ?, ?, ?, ?, ?, 'UNPAID')
-
             ON CONFLICT(invoice_id) DO UPDATE SET
-                client_email = excluded.client_email,
-                freelancer_name = excluded.freelancer_name,
-                amount = excluded.amount,
-                currency = excluded.currency,
-                invoice_status = excluded.invoice_status
-        """, (
+                client_email = COALESCE(excluded.client_email, invoices.client_email),
+                freelancer_name = COALESCE(excluded.freelancer_name, invoices.freelancer_name),
+                amount = COALESCE(excluded.amount, invoices.amount),
+                currency = COALESCE(excluded.currency, invoices.currency),
+                invoice_status = CASE
+                    WHEN invoices.invoice_status IN ('PAID', 'SENT', 'CANCELLED', 'REFUNDED')
+                    THEN invoices.invoice_status
+                    ELSE excluded.invoice_status
+                END
+                               """, (
             invoice_id,
             client_email,
             freelancer_name,
