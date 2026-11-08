@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 
 import {
   IndianRupee,
@@ -48,6 +49,18 @@ const invoices = [
 ];
 
 export default function Invoices() {
+    const API_URL = "http://127.0.0.1:5000";
+  const [realInvoices, setRealInvoices] = useState([]);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/paypal/invoices`)
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("INVOICES:", data);
+        setRealInvoices(data.invoices || []);
+      })
+      .catch((err) => console.log("Invoice load error:", err));
+  }, []);
   return (
     <div className="invoices-page">
 
@@ -57,13 +70,38 @@ export default function Invoices() {
           <h1>Invoices & Payments</h1>
           <p>Manage client invoices and track incoming payments.</p>
         </div>
-
-        <button
+                <button
           className="primary-button"
-          onClick={() => alert("Invoice creation will be enabled in a later step.")}
+          onClick={async () => {
+            const client_email = prompt("Client email:");
+            const freelancer_name = prompt("Your full name (first and last):");
+            const amount = prompt("Amount in USD:");
+            const description = prompt("Invoice description:");
+            if (!client_email || !freelancer_name || !amount || !description) return;
+            try {
+              const res = await fetch(`${API_URL}/api/paypal/create-invoice`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  approved: true,
+                  client_email,
+                  freelancer_name,
+                  amount,
+                  description,
+                  currency: "USD",
+                }),
+              });
+              const data = await res.json();
+              alert(res.ok ? "Draft invoice created: " + data.invoice_id : "Error: " + JSON.stringify(data));
+            } catch (e) {
+              alert("Error: " + e.message);
+            }
+          }}
         >
           <Plus size={17} /> Create Invoice
         </button>
+
+        
       </div>
 
       <div className="payment-info-banner">
@@ -147,7 +185,17 @@ export default function Invoices() {
             </thead>
 
             <tbody>
-              {invoices.map((invoice) => (
+              {(realInvoices.length > 0
+  ? realInvoices.map((r) => ({
+      id: r.invoice_id,
+      client: r.client_email,
+      project: r.freelancer_name,
+      date: r.created_at,
+      amount: `${r.currency} ${r.amount}`,
+      status: r.payment_status === "PAID" ? "Paid" : r.invoice_status === "DRAFT" ? "Pending" : r.invoice_status === "SENT" ? "Pending" : "Pending",
+    }))
+  : invoices
+).map((invoice, i) => (
                 <tr key={invoice.id}>
                   <td className="invoice-id">{invoice.id}</td>
 
@@ -170,7 +218,24 @@ export default function Invoices() {
                     <button
                       className="invoice-action"
                       title="Download invoice"
-                      onClick={() => alert("Invoice download will be added later.")}
+                      onClick={async () => {
+  if (!String(invoice.id).startsWith("INV2-")) {
+    alert("This is a demo invoice.");
+    return;
+  }
+  if (!window.confirm("Send this invoice to the client through PayPal?")) return;
+  try {
+    const res = await fetch(`${API_URL}/api/paypal/send-invoice/${invoice.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved: true }),
+    });
+    const data = await res.json();
+    alert(res.ok ? "Invoice sent!" : "Error: " + JSON.stringify(data));
+  } catch (e) {
+    alert("Error: " + e.message);
+  }
+}}
                     >
                       <Download size={17} />
                     </button>
