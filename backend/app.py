@@ -25,6 +25,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = Flask(__name__)
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
 
 app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024
 
@@ -629,13 +635,19 @@ def get_paypal_invoice(invoice_id):
     except requests.exceptions.RequestException as e:
         print("GET PAYPAL INVOICE ERROR:", repr(e), flush=True)
 
+        status_code = 502
+
+        if e.response is not None:
+            if e.response.status_code == 404:
+                status_code = 404
+
         return jsonify({
-            "error": "Could not retrieve PayPal invoice",
+            "error": "PayPal invoice not found" if status_code == 404 else "Could not retrieve PayPal invoice",
             "details": (
                 e.response.text[:1000]
                 if e.response is not None else str(e)
             )
-        }), 502
+        }), status_code
 
     except Exception as e:
         print("GET INVOICE ERROR:", repr(e), flush=True)
