@@ -1,4 +1,4 @@
-
+import { useState, useEffect } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -42,6 +42,19 @@ const disputes = [
 ];
 
 export default function Disputes() {
+    const API_URL = "http://127.0.0.1:5000";
+  const [realDisputes, setRealDisputes] = useState(null);
+    const list = realDisputes ? (realDisputes.disputes?.items || []) : disputes;
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/paypal/disputes`)
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("DISPUTES:", data);
+        setRealDisputes(data);
+      })
+      .catch((err) => console.log("Dispute load error:", err));
+  }, []);
   return (
     <div className="disputes-page">
 
@@ -77,7 +90,7 @@ export default function Disputes() {
             <AlertCircle size={20} />
           </div>
           <span>Total Disputes</span>
-          <strong>3</strong>
+          <strong>{list.length}</strong>
           <small>All recorded cases</small>
         </div>
 
@@ -86,7 +99,7 @@ export default function Disputes() {
             <Clock size={20} />
           </div>
           <span>Open Disputes</span>
-          <strong>1</strong>
+          <strong>{list.filter((d) => d.status === "OPEN").length}</strong>
           <small>Awaiting response</small>
         </div>
 
@@ -95,7 +108,7 @@ export default function Disputes() {
             <BrainCircuit size={20} />
           </div>
           <span>Under Review</span>
-          <strong>1</strong>
+          <strong>{list.filter((d) => d.status === "UNDER_REVIEW" || d.status === "WAITING_FOR_SELLER_RESPONSE").length}</strong>
           <small>AI analysis in progress</small>
         </div>
 
@@ -104,7 +117,7 @@ export default function Disputes() {
             <CheckCircle2 size={20} />
           </div>
           <span>Resolved</span>
-          <strong>1</strong>
+          <strong>{list.filter((d) => d.status === "RESOLVED").length}</strong>
           <small>Successfully closed</small>
         </div>
 
@@ -119,8 +132,13 @@ export default function Disputes() {
           </div>
           <span className="dispute-count">3 Cases</span>
         </div>
-
-        <div className="dispute-table-scroll">
+                {list.length === 0 && (
+          <p style={{ padding: "16px", color: "#6b7280" }}>
+            No disputes found in your PayPal sandbox account.
+          </p>
+        )}
+      
+         <div className="dispute-table-scroll">
           <table className="dispute-table">
             <thead>
               <tr>
@@ -134,7 +152,7 @@ export default function Disputes() {
             </thead>
 
             <tbody>
-              {disputes.map((item) => (
+              {list.map((item) => (
                 <tr key={item.id}>
                   <td className="dispute-id">{item.id}</td>
                   <td>
