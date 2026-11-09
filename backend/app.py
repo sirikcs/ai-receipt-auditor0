@@ -1,4 +1,4 @@
-from dispute_handler import (
+﻿from dispute_handler import (
     list_disputes,
     get_dispute_details,
     analyze_dispute
@@ -15,6 +15,34 @@ from urllib.parse import urlparse
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
+
+def parse_numeric_value(value):
+    """Safely extract a finite numeric value from Gemini output."""
+
+    if value is None or isinstance(value, bool):
+        return None
+
+    try:
+        if isinstance(value, (int, float, Decimal)):
+            number = Decimal(str(value))
+        else:
+            match = re.search(
+                r"[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?",
+                str(value)
+            )
+
+            if not match:
+                return None
+
+            number = Decimal(match.group(0).replace(",", ""))
+
+        if not number.is_finite():
+            return None
+
+        return float(number)
+
+    except (ValueError, InvalidOperation, TypeError):
+        return None
 
 # =========================================================
 # CONFIGURATION
@@ -433,13 +461,27 @@ def analyze_contract_worklog():
                 "payment_type": None
             }
 
-        estimated_hours = contract_details.get("estimated_hours")
+        
+
+        estimated_hours = parse_numeric_value(
+            contract_details.get("estimated_hours")
+        )
+
+        agreed_amount = parse_numeric_value(
+            contract_details.get("agreed_amount")
+        )
+
+        # Store normalized values in the contract details.
+        contract_details["estimated_hours"] = estimated_hours
+        contract_details["agreed_amount"] = agreed_amount
 
         hours_difference = (
-            actual_hours - float(estimated_hours)
+            actual_hours - estimated_hours
             if estimated_hours is not None
             else None
         )
+
+
 
         worklog_summary = {
             "actual_hours": actual_hours,
