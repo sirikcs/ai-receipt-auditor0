@@ -1,4 +1,4 @@
-﻿from dispute_handler import (
+from dispute_handler import (
     list_disputes,
     get_dispute_details,
     analyze_dispute
@@ -340,6 +340,7 @@ def analyze_contract_worklog():
     try:
         from pypdf import PdfReader
         import io
+        import re
 
         pdf = PdfReader(io.BytesIO(contract_file.read()))
 
@@ -348,14 +349,30 @@ def analyze_contract_worklog():
             for page in pdf.pages
         )
 
-        csv_text = worklog_file.read().decode("utf-8-sig")
+        if not contract_text.strip():
+            return jsonify({
+                "error": "Could not extract readable text from PDF"
+            }), 400
 
+        csv_text = worklog_file.read().decode("utf-8-sig")
         rows = list(csv.DictReader(csv_text.splitlines()))
 
         if not rows:
             return jsonify({
                 "error": "Worklog CSV is empty or has no header"
             }), 400
+
+        required_columns = {"task", "hours"}
+
+        if not required_columns.issubset(set(rows[0].keys())):
+            return jsonify({
+                "error": "CSV must contain task and hours columns"
+            }), 400
+
+        actual_hours = sum(
+            float(row.get("hours") or 0)
+            for row in rows
+        )
 
         prompt = f"""
         You are an AI receipt and freelancer invoice auditor.
@@ -381,10 +398,71 @@ def analyze_contract_worklog():
 
         analysis = analyze_with_gemini(prompt)
 
+        extraction_prompt = f"""
+        Extract these details from the contract.
+        Return ONLY valid JSON with these four fields:
+        estimated_hours, agreed_amount, currency, payment_type.
+
+        Use null when information is not explicitly stated.
+        Do not guess.
+
+        CONTRACT:
+        {contract_text[:20000]}
+        """
+
+        structured_text = analyze_with_gemini(extraction_prompt)
+
+        structured_text = re.sub(
+            r"```(?:json)?|```",
+            "",
+            structured_text
+        ).strip()
+
+        try:
+            match = re.search(r"\{.*\}", structured_text, re.DOTALL)
+            if not match:
+                raise ValueError("No JSON object returned")
+
+            contract_details = json.loads(match.group(0))
+
+        except (json.JSONDecodeError, ValueError):
+            contract_details = {
+                "estimated_hours": None,
+                "agreed_amount": None,
+                "currency": None,
+                "payment_type": None
+            }
+
+        estimated_hours = contract_details.get("estimated_hours")
+
+        hours_difference = (
+            actual_hours - float(estimated_hours)
+            if estimated_hours is not None
+            else None
+        )
+
+        worklog_summary = {
+            "actual_hours": actual_hours,
+            "estimated_hours": estimated_hours,
+            "hours_difference": hours_difference,
+            "tasks": rows
+        }
+
+        payment_summary = {
+            "agreed_amount": contract_details.get("agreed_amount"),
+            "currency": contract_details.get("currency"),
+            "payment_type": contract_details.get("payment_type")
+        }
+
         return jsonify({
             "status": "success",
+            "contract_details": contract_details,
+            "worklog_summary": worklog_summary,
+            "payment_summary": payment_summary,
+            "ai_analysis": analysis,
             "analysis": analysis,
-            "worklog_entries": len(rows)
+            "worklog_entries": len(rows),
+            "note": "Advisory only. Human approval required before invoicing."
         }), 200
 
     except ImportError:
