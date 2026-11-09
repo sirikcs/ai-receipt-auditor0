@@ -17,7 +17,7 @@ export default function AuditResults({ result }) {
   const estimatedHours = result?.worklog_summary?.estimated_hours;
   const agreedAmount = result?.payment_summary?.agreed_amount;
   const currency = result?.payment_summary?.currency;
-  const aiText = result?.ai_analysis;
+  const aiText = result?.ai_analysis || result?.analysis;
   return (
     <div className="results-page">
 
@@ -27,7 +27,7 @@ export default function AuditResults({ result }) {
           <h1>AI Audit Results</h1>
           <p>Here's the analysis of your freelance project.</p>
         </div>
-        <span className="sample-badge">DEMO REPORT</span>
+        <span className="sample-badge">AI REPORT</span>
       </div>
 
       <div className="result-success-banner">
@@ -35,24 +35,26 @@ export default function AuditResults({ result }) {
           <CheckCircle2 size={24} />
         </div>
         <div>
-          <strong>Sample audit completed successfully</strong>
-          <p>This is illustrative data. Actual results will come from the AI backend.</p>
+          <strong>Audit completed successfully</strong>
+<p>This report is based on your uploaded contract and work log.</p>
         </div>
       </div>
 
       <section className="score-section">
         <div className="score-card">
-          <p className="result-label">AI FAIRNESS SCORE</p>
-          <div className="score-circle">
-            <div>
-              <strong>92</strong>
-              <span>/100</span>
-            </div>
-          </div>
-          <span className="score-rating">Good Fairness</span>
-          <p className="score-description">
-            The sample project appears reasonably aligned with the agreed amount.
-          </p>
+          <p className="result-label">HOURS DIFFERENCE</p>
+<div className="score-circle">
+  <div>
+    <strong>{result?.worklog_summary?.hours_difference ?? "N/A"}</strong>
+    <span>hrs</span>
+  </div>
+</div>
+<span className="score-rating">
+  {result?.worklog_summary?.hours_difference <= 0 ? "Within Estimate" : "Over Estimate"}
+</span>
+<p className="score-description">
+  Recorded hours compared with the hours estimated in the contract.
+</p>
         </div>
 
         <div className="score-details">
