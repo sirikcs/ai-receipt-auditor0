@@ -51,6 +51,14 @@ const invoices = [
 export default function Invoices() {
     const API_URL = "http://127.0.0.1:5000";
   const [realInvoices, setRealInvoices] = useState([]);
+    const total = realInvoices.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const paid = realInvoices
+    .filter((r) => r.payment_status === "PAID")
+    .reduce((s, r) => s + Number(r.amount || 0), 0);
+  const paidCount = realInvoices.filter((r) => r.payment_status === "PAID").length;
+  const pending = total - paid;
+  const pendingCount = realInvoices.length - paidCount;
+  const money = (n) => `USD ${n.toFixed(2)}`;
 
   useEffect(() => {
     fetch(`${API_URL}/api/paypal/invoices`)
@@ -122,8 +130,8 @@ export default function Invoices() {
             <span>Total Invoiced</span>
             <FileText size={19} />
           </div>
-          <strong>₹1,27,500</strong>
-          <small>Across 4 invoices</small>
+          <strong>{money(total)}</strong>
+          <small>Across {realInvoices.length} invoices</small>
         </div>
 
         <div className="invoice-stat-card">
@@ -131,8 +139,8 @@ export default function Invoices() {
             <span>Amount Received</span>
             <CheckCircle2 size={19} />
           </div>
-          <strong>₹63,000</strong>
-          <small>2 successful payments</small>
+          <strong>{money(paid)}</strong>
+          <small>{paidCount} successful payments</small>
         </div>
 
         <div className="invoice-stat-card">
@@ -140,8 +148,8 @@ export default function Invoices() {
             <span>Pending Payments</span>
             <Clock size={19} />
           </div>
-          <strong>₹28,000</strong>
-          <small>1 awaiting payment</small>
+          <strong>{money(pending)}</strong>
+          <small>{pendingCount} awaiting payment</small>
         </div>
 
         <div className="invoice-stat-card">
@@ -149,8 +157,8 @@ export default function Invoices() {
             <span>Overdue Amount</span>
             <IndianRupee size={19} />
           </div>
-          <strong>₹36,500</strong>
-          <small>1 overdue invoice</small>
+          <strong>{money(0)}</strong>
+          <small>No overdue tracking yet</small>
         </div>
 
       </section>
@@ -263,13 +271,13 @@ export default function Invoices() {
         </div>
 
         <span className="connection-status">
-          <span></span> Demo Mode
+          <span></span> Sandbox Mode
         </span>
       </section>
 
-      <p className="invoice-demo-note">
-        All invoice records and amounts shown here are fictional demonstration data.
-        No actual invoices or payments have been created.
+            <p className="invoice-demo-note">
+        Invoice records and totals come from your backend and the PayPal sandbox.
+        No real money is moved in sandbox mode.
       </p>
 
     </div>
