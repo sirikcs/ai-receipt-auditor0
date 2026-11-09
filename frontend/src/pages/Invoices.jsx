@@ -49,25 +49,64 @@ const invoices = [
 ];
 
 export default function Invoices() {
-    const API_URL = "http://127.0.0.1:5000";
+  const API_URL = "http://127.0.0.1:5000";
   const [realInvoices, setRealInvoices] = useState([]);
-    const total = realInvoices.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+  const total = realInvoices.reduce(
+    (sum, r) => sum + Number(r.amount || 0),
+    0
+  );
+
   const paid = realInvoices
     .filter((r) => r.payment_status === "PAID")
-    .reduce((s, r) => s + Number(r.amount || 0), 0);
-  const paidCount = realInvoices.filter((r) => r.payment_status === "PAID").length;
-  const pending = total - paid;
-  const pendingCount = realInvoices.length - paidCount;
+    .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+  const paidCount = realInvoices.filter(
+    (r) => r.payment_status === "PAID"
+  ).length;
+
+  const overdueInvoices = realInvoices.filter(
+    (r) => r.invoice_status === "OVERDUE"
+  );
+
+  const overdue = overdueInvoices.reduce(
+    (sum, r) => sum + Number(r.amount || 0),
+    0
+  );
+
+  const pendingInvoices = realInvoices.filter(
+    (r) =>
+      r.payment_status !== "PAID" &&
+      ["DRAFT", "SENT"].includes(r.invoice_status)
+  );
+
+  const pendingCount = pendingInvoices.length;
+
+  const pending = pendingInvoices.reduce(
+    (sum, r) => sum + Number(r.amount || 0),
+    0
+  );
+
   const money = (n) => `USD ${n.toFixed(2)}`;
+  const loadInvoices = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/paypal/invoices`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to load invoices");
+      }
+
+      console.log("INVOICES:", data);
+      setRealInvoices(data.invoices || []);
+    } catch (err) {
+      console.error("Invoice load error:", err);
+      alert("Could not refresh invoices: " + err.message);
+    }
+  };
 
   useEffect(() => {
-    fetch(`${API_URL}/api/paypal/invoices`)
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("INVOICES:", data);
-        setRealInvoices(data.invoices || []);
-      })
-      .catch((err) => console.log("Invoice load error:", err));
+    loadInvoices();
   }, []);
   return (
     <div className="invoices-page">
@@ -78,7 +117,7 @@ export default function Invoices() {
           <h1>Invoices & Payments</h1>
           <p>Manage client invoices and track incoming payments.</p>
         </div>
-                <button
+        <button
           className="primary-button"
           onClick={async () => {
             const client_email = prompt("Client email:");
@@ -100,7 +139,14 @@ export default function Invoices() {
                 }),
               });
               const data = await res.json();
-              alert(res.ok ? "Draft invoice created: " + data.invoice_id : "Error: " + JSON.stringify(data));
+              if (!res.ok) {
+                throw new Error(
+                  data.details || data.error || JSON.stringify(data)
+                );
+              }
+
+              alert("Draft invoice created: " + data.invoice_id);
+              await loadInvoices();
             } catch (e) {
               alert("Error: " + e.message);
             }
@@ -109,7 +155,7 @@ export default function Invoices() {
           <Plus size={17} /> Create Invoice
         </button>
 
-        
+
       </div>
 
       <div className="payment-info-banner">
@@ -157,8 +203,8 @@ export default function Invoices() {
             <span>Overdue Amount</span>
             <IndianRupee size={19} />
           </div>
-          <strong>{money(0)}</strong>
-          <small>No overdue tracking yet</small>
+          <strong>{money(overdue)}</strong>
+          <small>{overdueInvoices.length} overdue invoices</small>
         </div>
 
       </section>
@@ -193,63 +239,90 @@ export default function Invoices() {
             </thead>
 
             <tbody>
-              {(realInvoices.length > 0
-  ? realInvoices.map((r) => ({
-      id: r.invoice_id,
-      client: r.client_email,
-      project: r.freelancer_name,
-      date: r.created_at,
-      amount: `${r.currency} ${r.amount}`,
-      status: r.payment_status === "PAID" ? "Paid" : r.invoice_status === "DRAFT" ? "Pending" : r.invoice_status === "SENT" ? "Pending" : "Pending",
-    }))
-  : invoices
-).map((invoice, i) => (
-                <tr key={invoice.id}>
-                  <td className="invoice-id">{invoice.id}</td>
-
-                  <td>
-                    <strong>{invoice.client}</strong>
-                    <small>{invoice.project}</small>
-                  </td>
-
-                  <td>{invoice.date}</td>
-
-                  <td className="invoice-amount">{invoice.amount}</td>
-
-                  <td>
-                    <span className={`invoice-status ${invoice.status.toLowerCase()}`}>
-                      {invoice.status}
-                    </span>
-                  </td>
-
-                  <td>
-                    <button
-                      className="invoice-action"
-                      title="Download invoice"
-                      onClick={async () => {
-  if (!String(invoice.id).startsWith("INV2-")) {
-    alert("This is a demo invoice.");
-    return;
-  }
-  if (!window.confirm("Send this invoice to the client through PayPal?")) return;
-  try {
-    const res = await fetch(`${API_URL}/api/paypal/send-invoice/${invoice.id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approved: true }),
-    });
-    const data = await res.json();
-    alert(res.ok ? "Invoice sent!" : "Error: " + JSON.stringify(data));
-  } catch (e) {
-    alert("Error: " + e.message);
-  }
-}}
-                    >
-                      <Download size={17} />
-                    </button>
+              {realInvoices.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "24px" }}>
+                    No invoices yet.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                realInvoices.map((r) => {
+                  const invoiceStatus = String(r.invoice_status || "").toUpperCase();
+                  const paymentStatus = String(r.payment_status || "").toUpperCase();
+
+                  let status = invoiceStatus || "Unknown";
+
+                  if (paymentStatus === "REFUNDED" || invoiceStatus === "REFUNDED") {
+                    status = "Refunded";
+                  } else if (paymentStatus === "PAID" || invoiceStatus === "PAID") {
+                    status = "Paid";
+                  } else if (invoiceStatus === "CANCELLED") {
+                    status = "Cancelled";
+                  } else if (invoiceStatus === "SENT") {
+                    status = "Sent";
+                  } else if (invoiceStatus === "DRAFT") {
+                    status = "Draft";
+                  }
+
+                  return (
+                    <tr key={r.invoice_id}>
+                      <td className="invoice-id">{r.invoice_id}</td>
+
+                      <td>
+                        <strong>{r.client_email}</strong>
+                        <small>{r.freelancer_name}</small>
+                      </td>
+
+                      <td>{r.created_at}</td>
+
+                      <td className="invoice-amount">
+                        {r.currency} {r.amount}
+                      </td>
+
+                      <td>
+                        <span className={`invoice-status ${status.toLowerCase()}`}>
+                          {status}
+                        </span>
+                      </td>
+
+                      <td>
+                        <button
+                          className="invoice-action"
+                          title="Send invoice"
+                          disabled={invoiceStatus !== "DRAFT"}
+                          onClick={async () => {
+                            if (!window.confirm("Send this invoice to the client through PayPal?")) return;
+
+                            try {
+                              const res = await fetch(
+                                `${API_URL}/api/paypal/send-invoice/${r.invoice_id}`,
+                                {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ approved: true }),
+                                }
+                              );
+
+                              const data = await res.json();
+
+                              if (!res.ok) {
+                                throw new Error(data.error || JSON.stringify(data));
+                              }
+
+                              alert("Invoice sent successfully!");
+                              await loadInvoices();
+                            } catch (e) {
+                              alert("Error: " + e.message);
+                            }
+                          }}
+                        >
+                          <Download size={17} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -275,9 +348,9 @@ export default function Invoices() {
         </span>
       </section>
 
-            <p className="invoice-demo-note">
-        Invoice records and totals come from your backend and the PayPal sandbox.
-        No real money is moved in sandbox mode.
+      <p className="invoice-demo-note">
+        These are PayPal Sandbox test records, not live transactions.
+        No real money is moved in Sandbox mode.
       </p>
 
     </div>
