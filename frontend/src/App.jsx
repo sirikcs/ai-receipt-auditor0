@@ -1,6 +1,4 @@
-
 import { useState, useEffect } from "react";
-
 import {
   LayoutDashboard,
   FilePlus2,
@@ -40,17 +38,12 @@ import "./App.css";
 
 const API_URL = "http://127.0.0.1:5000";
 
-const formatINR = (amount) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(amount);
-
+// Format all dashboard amounts in US Dollars.
 const formatUSD = (amount) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
+    maximumFractionDigits: 0,
   }).format(amount);
 
 // Illustrative sample chart data.
@@ -372,12 +365,12 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
                 <YAxis
                   axisLine={false}
                   tickLine={false}
-                  tickFormatter={(value) => `₹${value / 1000}k`}
+                  tickFormatter={(value) => `$${value / 1000}k`}
                   width={55}
                 />
 
                 <Tooltip
-                  formatter={(value) => formatINR(Number(value))}
+                  formatter={(value) => formatUSD(Number(value))}
                 />
 
                 <Area

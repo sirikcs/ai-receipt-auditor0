@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import {
   UploadCloud,
@@ -10,18 +9,31 @@ import {
   ShieldCheck,
   BrainCircuit,
 } from "lucide-react";
+
 const API_URL = "http://127.0.0.1:5000";
+
 export default function NewAudit({ onComplete }) {
   const [contract, setContract] = useState(null);
   const [worklog, setWorklog] = useState(null);
   const [projectName, setProjectName] = useState("");
   const [clientName, setClientName] = useState("");
   const [amount, setAmount] = useState("");
-const [loading, setLoading] = useState(false);
-  const FileUpload = ({ title, description, accept, file, setFile, icon: Icon }) => (
+  const [loading, setLoading] = useState(false);
+
+  const FileUpload = ({
+    title,
+    description,
+    accept,
+    file,
+    setFile,
+    icon: Icon,
+  }) => (
     <div className="upload-card">
       <div className="upload-card-heading">
-        <div className="upload-icon"><Icon size={22} /></div>
+        <div className="upload-icon">
+          <Icon size={22} />
+        </div>
+
         <div>
           <h3>{title}</h3>
           <p>{description}</p>
@@ -32,52 +44,67 @@ const [loading, setLoading] = useState(false);
         <div className="selected-file">
           <FileText size={20} />
           <span>{file.name}</span>
-          <button type="button" onClick={() => setFile(null)}><X size={17} /></button>
+
+          <button type="button" onClick={() => setFile(null)}>
+            <X size={17} />
+          </button>
         </div>
       ) : (
         <label className="upload-area">
           <UploadCloud size={30} />
           <strong>Click to upload or drag your file here</strong>
           <span>Supported format: {accept}</span>
+
           <input
             type="file"
             accept={accept}
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            onChange={(e) =>
+              setFile(e.target.files?.[0] || null)
+            }
           />
         </label>
       )}
     </div>
   );
-const handleSubmit = async (e) => {
-  e.preventDefault();
 
-  if (!contract || !worklog) {
-    alert("Please upload both files");
-    return;
-  }
+  const handleSubmit = async (e) => {
+    e.preventDefault();
 
-  setLoading(true);
-  try {
-    const formData = new FormData();
-    formData.append("contract", contract);
-    formData.append("worklog", worklog);
+    if (!contract || !worklog) {
+      alert("Please upload both files");
+      return;
+    }
 
-    const res = await fetch(`${API_URL}/api/analyze-contract-worklog`, {
-      method: "POST",
-      body: formData,
-    });
-    const data = await res.json();
+    setLoading(true);
 
-    if (!res.ok) throw new Error(data.error || "Analysis failed");
+    try {
+      const formData = new FormData();
+      formData.append("contract", contract);
+      formData.append("worklog", worklog);
 
-    console.log("AI RESULT:", data);
-    if (onComplete) onComplete(data);
-  } catch (err) {
-    alert("Error: " + err.message);
-  } finally {
-    setLoading(false);
-  }
-};
+      const res = await fetch(
+        `${API_URL}/api/analyze-contract-worklog`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Analysis failed");
+      }
+
+      console.log("AI RESULT:", data);
+
+      if (onComplete) onComplete(data);
+    } catch (err) {
+      alert("Error: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="audit-page">
@@ -85,18 +112,28 @@ const handleSubmit = async (e) => {
         <div>
           <p className="eyebrow">WORKSPACE / NEW AUDIT</p>
           <h1>Create New AI Audit</h1>
-          <p>Upload your project documents to check invoice fairness.</p>
+          <p>
+            Upload your project documents to check invoice fairness.
+          </p>
         </div>
+
         <div className="secure-label">
-          <ShieldCheck size={17} /> Secure document submission
+          <ShieldCheck size={17} />
+          Secure document submission
         </div>
       </div>
 
       <div className="audit-intro">
-        <div className="intro-icon"><BrainCircuit size={27} /></div>
+        <div className="intro-icon">
+          <BrainCircuit size={27} />
+        </div>
+
         <div>
           <strong>Let AI review your freelance work</strong>
-          <p>We'll compare your agreed payment, project details and recorded work hours to identify possible discrepancies.</p>
+          <p>
+            We'll compare your agreed payment, project details and
+            recorded work hours to identify possible discrepancies.
+          </p>
         </div>
       </div>
 
@@ -104,15 +141,19 @@ const handleSubmit = async (e) => {
         <section className="audit-form-panel">
           <div className="section-heading">
             <span>01</span>
+
             <div>
               <h2>Project Information</h2>
-              <p>Tell us a little about this freelance project.</p>
+              <p>
+                Tell us a little about this freelance project.
+              </p>
             </div>
           </div>
 
           <div className="audit-input-grid">
             <label className="field">
               Project Name
+
               <input
                 required
                 value={projectName}
@@ -123,6 +164,7 @@ const handleSubmit = async (e) => {
 
             <label className="field">
               Client Name
+
               <input
                 required
                 value={clientName}
@@ -132,14 +174,15 @@ const handleSubmit = async (e) => {
             </label>
 
             <label className="field full-field">
-              Agreed Project Amount (₹)
+              Agreed Project Amount ($)
+
               <input
                 required
                 type="number"
                 min="1"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="e.g. 45000"
+                placeholder="e.g. 450"
               />
             </label>
           </div>
@@ -148,9 +191,12 @@ const handleSubmit = async (e) => {
         <section className="audit-form-panel">
           <div className="section-heading">
             <span>02</span>
+
             <div>
               <h2>Upload Project Documents</h2>
-              <p>Provide the documents required for AI analysis.</p>
+              <p>
+                Provide the documents required for AI analysis.
+              </p>
             </div>
           </div>
 
@@ -181,9 +227,14 @@ const handleSubmit = async (e) => {
             Your documents stay ready for review.
           </div>
 
-          <button className="primary-button audit-submit" type="submit" disabled={loading}>
-  {loading ? "Analyzing..." : "Continue to AI Analysis"} <ArrowRight size={18} />
-</button>
+          <button
+            className="primary-button audit-submit"
+            type="submit"
+            disabled={loading}
+          >
+            {loading ? "Analyzing..." : "Continue to AI Analysis"}
+            <ArrowRight size={18} />
+          </button>
         </div>
       </form>
     </div>
