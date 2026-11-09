@@ -16,11 +16,18 @@ export default function AuditResults({ result, onContinue }) {
   const estimatedHours = result?.worklog_summary?.estimated_hours;
   const agreedAmount = result?.payment_summary?.agreed_amount;
   const currency = result?.payment_summary?.currency;
-  const aiText = result?.ai_analysis;
 
-  const actual = Number(actualHours || 0);
-  const estimated = Number(estimatedHours || 0);
+  const aiText = result?.ai_analysis || result?.analysis;
+
+  const actual = Number(actualHours ?? 0);
+  const estimated = Number(estimatedHours ?? 0);
   const maxHours = Math.max(actual, estimated, 1);
+
+  const hoursDifference =
+    result?.worklog_summary?.hours_difference ??
+    (actualHours != null && estimatedHours != null
+      ? actual - estimated
+      : null);
 
   const formatAmount = (amount) => {
     if (amount == null) return "N/A";
@@ -43,29 +50,38 @@ export default function AuditResults({ result, onContinue }) {
           <CheckCircle2 size={24} />
         </div>
         <div>
-          <strong>Audit submitted successfully</strong>
+          <strong>Audit completed successfully</strong>
           <p>
-            Results below are based on the information available
-            in the audit response.
+            Results are based on the information available
+            in your uploaded contract and work log.
           </p>
         </div>
       </div>
 
       <section className="score-section">
         <div className="score-card">
-          <p className="result-label">AI FAIRNESS SCORE</p>
+          <p className="result-label">HOURS DIFFERENCE</p>
 
           <div className="score-circle">
             <div>
-              <strong>N/A</strong>
+              <strong>
+                {hoursDifference ?? "N/A"}
+              </strong>
+              <span>hrs</span>
             </div>
           </div>
 
-          <span className="score-rating">Not available</span>
+          <span className="score-rating">
+            {hoursDifference == null
+              ? "Not available"
+              : hoursDifference <= 0
+                ? "Within Estimate"
+                : "Over Estimate"}
+          </span>
 
           <p className="score-description">
-            A verified fairness score is not available in the
-            current audit response.
+            Recorded hours compared with the hours estimated
+            in the contract.
           </p>
         </div>
 
@@ -219,7 +235,13 @@ export default function AuditResults({ result, onContinue }) {
             <BrainCircuit size={22} />
           </div>
 
-          <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, padding: "8px 4px" }}>
+          <div
+            style={{
+              whiteSpace: "pre-wrap",
+              lineHeight: 1.6,
+              padding: "8px 4px",
+            }}
+          >
             {aiText}
           </div>
         </section>

@@ -11,15 +11,18 @@ Request: `multipart/form-data`
 - `worklog`: CSV file with columns `task` and `hours`
 
 Success (200):
-```json
 {
+  "status": "success",
   "contract_details": { "estimated_hours": 40, "agreed_amount": 500, "currency": "USD", "payment_type": "fixed-price" },
-  "worklog_summary": { "actual_hours": 38.0, "estimated_hours": 40.0, "hours_difference": -2.0, "tasks": [] },
+  "worklog_summary": { "actual_hours": 38.0, "estimated_hours": 40.0, "hours_difference": -2.0 },
   "payment_summary": { "agreed_amount": 500, "currency": "USD", "payment_type": "fixed-price" },
-  "ai_analysis": "Gemini analysis text (markdown)",
-  "note": "Advisory only. Human approval required before invoicing."
+  "actual_hours": 38.0,
+  "estimated_hours": 40.0,
+  "agreed_amount": 500,
+  "currency": "USD",
+  "ai_analysis": "Gemini analysis text (markdown)"
 }
-```
+
 Errors: 400 (missing or invalid file/columns), 500 (AI failure).
 
 ## 2. PayPal connection test
@@ -84,7 +87,7 @@ Success (200):
 ## 7. PayPal webhook (backend only)
 `POST /api/paypal/webhook`. Called by PayPal, not by the frontend.
 
-## 8. Disputes (backend ready, frontend not connected yet)
+## 8. Disputes (connected: the page reads the list)
 - `GET /api/paypal/disputes`
 - `GET /api/paypal/disputes/<dispute_id>`
 - `GET /api/paypal/disputes/<dispute_id>/analyze`
