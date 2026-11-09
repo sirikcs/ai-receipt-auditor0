@@ -1,8 +1,8 @@
-from dispute_handler import (
+﻿from dispute_handler import (
     list_disputes,
     get_dispute_details,
     analyze_dispute
-)     
+)
 import os
 import re
 import csv
@@ -143,11 +143,6 @@ def update_invoice_status(invoice_id, invoice_status=None, payment_status=None):
     conn = get_db_connection()
 
     try:
-        conn.execute("""
-            INSERT OR IGNORE INTO invoices (invoice_id)
-            VALUES (?)
-        """, (invoice_id,))
-
         if invoice_status is not None:
             conn.execute("""
                 UPDATE invoices
@@ -935,11 +930,26 @@ def paypal_webhook():
                     "message": "Duplicate webhook ignored",
                     "event_id": event_id
                 }), 200
+                                    # CHECK THAT THE INVOICE EXISTS BEFORE PROCESSING
+            invoice_exists = conn.execute("""
+                SELECT 1
+                FROM invoices
+                WHERE invoice_id = ?
+            """, (invoice_id,)).fetchone()
 
-            conn.execute("""
-                INSERT OR IGNORE INTO invoices (invoice_id)
-                VALUES (?)
-            """, (invoice_id,))
+            if invoice_exists is None:
+                conn.rollback()
+
+                print(
+                    "WEBHOOK INVOICE NOT FOUND:",
+                    invoice_id,
+                    flush=True
+                )
+
+                return jsonify({
+                    "error": "Invoice not found; PayPal may retry this webhook"
+                }), 503
+
 
             if invoice_status is not None:
                 conn.execute("""
