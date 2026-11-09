@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import {
   AlertCircle,
@@ -16,7 +17,7 @@ const disputes = [
     id: "DSP-001",
     client: "Pixel Studio",
     invoice: "INV-2026-002",
-    amount: "₹28,000",
+    amount: "$28,000",
     issue: "Payment amount disagreement",
     date: "03 Nov 2026",
     status: "Open",
@@ -25,7 +26,7 @@ const disputes = [
     id: "DSP-002",
     client: "Nexa Solutions",
     invoice: "INV-2026-003",
-    amount: "₹12,500",
+    amount: "$12,500",
     issue: "Additional work hours disputed",
     date: "04 Nov 2026",
     status: "Under Review",
@@ -34,7 +35,7 @@ const disputes = [
     id: "DSP-003",
     client: "Bright Media",
     invoice: "INV-2026-004",
-    amount: "₹8,000",
+    amount: "$8,000",
     issue: "Project delivery clarification",
     date: "01 Nov 2026",
     status: "Resolved",
@@ -42,9 +43,12 @@ const disputes = [
 ];
 
 export default function Disputes() {
-    const API_URL = "http://127.0.0.1:5000";
+  const API_URL = "http://127.0.0.1:5000";
   const [realDisputes, setRealDisputes] = useState(null);
-    const list = realDisputes ? (realDisputes.disputes?.items || []) : disputes;
+
+  const list = realDisputes
+    ? (realDisputes.disputes?.items || [])
+    : disputes;
 
   useEffect(() => {
     fetch(`${API_URL}/api/paypal/disputes`)
@@ -55,6 +59,7 @@ export default function Disputes() {
       })
       .catch((err) => console.log("Dispute load error:", err));
   }, []);
+
   return (
     <div className="disputes-page">
 
@@ -108,7 +113,15 @@ export default function Disputes() {
             <BrainCircuit size={20} />
           </div>
           <span>Under Review</span>
-          <strong>{list.filter((d) => d.status === "UNDER_REVIEW" || d.status === "WAITING_FOR_SELLER_RESPONSE").length}</strong>
+          <strong>
+            {
+              list.filter(
+                (d) =>
+                  d.status === "UNDER_REVIEW" ||
+                  d.status === "WAITING_FOR_SELLER_RESPONSE"
+              ).length
+            }
+          </strong>
           <small>AI analysis in progress</small>
         </div>
 
@@ -132,13 +145,14 @@ export default function Disputes() {
           </div>
           <span className="dispute-count">3 Cases</span>
         </div>
-                {list.length === 0 && (
+
+        {list.length === 0 && (
           <p style={{ padding: "16px", color: "#6b7280" }}>
             No disputes found in your PayPal sandbox account.
           </p>
         )}
-      
-         <div className="dispute-table-scroll">
+
+        <div className="dispute-table-scroll">
           <table className="dispute-table">
             <thead>
               <tr>
@@ -163,13 +177,15 @@ export default function Disputes() {
                   <td className="dispute-amount">{item.amount}</td>
                   <td>{item.date}</td>
                   <td>
-                    <span className={`dispute-status ${
-                      item.status === "Open"
-                        ? "open"
-                        : item.status === "Resolved"
-                        ? "resolved"
-                        : "review"
-                    }`}>
+                    <span
+                      className={`dispute-status ${
+                        item.status === "Open"
+                          ? "open"
+                          : item.status === "Resolved"
+                          ? "resolved"
+                          : "review"
+                      }`}
+                    >
                       {item.status}
                     </span>
                   </td>
@@ -240,9 +256,11 @@ export default function Disputes() {
 
           <button
             className="dispute-copy-button"
-            onClick={() => navigator.clipboard.writeText(
-              "Hello, Thank you for raising your concern. We understand the importance of clarifying the invoice amount. We would be happy to review the agreed project scope, recorded work hours and invoice details together. Please let us know which specific item requires clarification so we can resolve this professionally. Thank you."
-            )}
+            onClick={() =>
+              navigator.clipboard.writeText(
+                "Hello, Thank you for raising your concern. We understand the importance of clarifying the invoice amount. We would be happy to review the agreed project scope, recorded work hours and invoice details together. Please let us know which specific item requires clarification so we can resolve this professionally. Thank you."
+              )
+            }
           >
             Copy Response <ArrowRight size={15} />
           </button>

@@ -1,52 +1,16 @@
+
 import { useState, useEffect } from "react";
 
 import {
-  IndianRupee,
   FileText,
   Clock,
   CheckCircle2,
   Plus,
   Download,
   Search,
-  ArrowUpRight,
   Wallet,
   CreditCard,
 } from "lucide-react";
-
-const invoices = [
-  {
-    id: "INV-2026-001",
-    client: "Aarav Technologies",
-    project: "Website Development",
-    date: "02 Nov 2026",
-    amount: "₹45,000",
-    status: "Paid",
-  },
-  {
-    id: "INV-2026-002",
-    client: "Pixel Studio",
-    project: "UI/UX Design",
-    date: "03 Nov 2026",
-    amount: "₹28,000",
-    status: "Pending",
-  },
-  {
-    id: "INV-2026-003",
-    client: "Nexa Solutions",
-    project: "Mobile App Design",
-    date: "04 Nov 2026",
-    amount: "₹36,500",
-    status: "Overdue",
-  },
-  {
-    id: "INV-2026-004",
-    client: "Bright Media",
-    project: "Brand Identity",
-    date: "05 Nov 2026",
-    amount: "₹18,000",
-    status: "Paid",
-  },
-];
 
 export default function Invoices() {
   const API_URL = "http://127.0.0.1:5000";
@@ -87,7 +51,14 @@ export default function Invoices() {
     0
   );
 
-  const money = (n) => `USD ${n.toFixed(2)}`;
+  const money = (n) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(n);
+
   const loadInvoices = async () => {
     try {
       const res = await fetch(`${API_URL}/api/paypal/invoices`);
@@ -108,6 +79,7 @@ export default function Invoices() {
   useEffect(() => {
     loadInvoices();
   }, []);
+
   return (
     <div className="invoices-page">
 
@@ -117,6 +89,7 @@ export default function Invoices() {
           <h1>Invoices & Payments</h1>
           <p>Manage client invoices and track incoming payments.</p>
         </div>
+
         <button
           className="primary-button"
           onClick={async () => {
@@ -124,7 +97,9 @@ export default function Invoices() {
             const freelancer_name = prompt("Your full name (first and last):");
             const amount = prompt("Amount in USD:");
             const description = prompt("Invoice description:");
+
             if (!client_email || !freelancer_name || !amount || !description) return;
+
             try {
               const res = await fetch(`${API_URL}/api/paypal/create-invoice`, {
                 method: "POST",
@@ -138,7 +113,9 @@ export default function Invoices() {
                   currency: "USD",
                 }),
               });
+
               const data = await res.json();
+
               if (!res.ok) {
                 throw new Error(
                   data.details || data.error || JSON.stringify(data)
@@ -154,8 +131,6 @@ export default function Invoices() {
         >
           <Plus size={17} /> Create Invoice
         </button>
-
-
       </div>
 
       <div className="payment-info-banner">
@@ -164,7 +139,9 @@ export default function Invoices() {
         </div>
         <div>
           <strong>Receive payments through PayPal</strong>
-          <p>Create invoices for your clients and let them pay you securely through PayPal.</p>
+          <p>
+            Create invoices for your clients and let them pay you securely through PayPal.
+          </p>
         </div>
         <span className="paypal-label">PayPal</span>
       </div>
@@ -201,7 +178,7 @@ export default function Invoices() {
         <div className="invoice-stat-card">
           <div className="invoice-stat-top">
             <span>Overdue Amount</span>
-            <IndianRupee size={19} />
+            <Wallet size={19} />
           </div>
           <strong>{money(overdue)}</strong>
           <small>{overdueInvoices.length} overdue invoices</small>
@@ -276,7 +253,7 @@ export default function Invoices() {
                       <td>{r.created_at}</td>
 
                       <td className="invoice-amount">
-                        {r.currency} {r.amount}
+                        {money(Number(r.amount || 0))}
                       </td>
 
                       <td>
