@@ -79,6 +79,7 @@ ai-receipt-auditor0/
 |   `-- requirements.txt
 |-- frontend/
 |-- BACKEND_API.md
+|-- API_CONTRACT.md
 `-- README.md
 ```
 
@@ -161,8 +162,9 @@ The backend will start on the local Flask development server.
 | GET | `/api/paypal/disputes/<dispute_id>` | Retrieve individual dispute details |
 | GET | `/api/paypal/disputes/<dispute_id>/analyze` | Analyse a dispute using Gemini AI |
 
-For request formats and additional endpoint details, refer to [BACKEND_API.md](BACKEND_API.md).
+For backend request formats and endpoint details, refer to [BACKEND_API.md](BACKEND_API.md).
 
+For frontend-backend integration details, refer to [API_CONTRACT.md](API_CONTRACT.md).
 ## Database and Security
 
 The backend uses SQLite to store invoice records and processed webhook events.
@@ -194,17 +196,21 @@ The backend has been tested for the following:
 
 ## Project Status
 
-The backend features have been implemented and tested in the PayPal Sandbox and local development environment.
+The backend and React frontend have been implemented and integrated.
 
-The React frontend has been developed separately. Frontend-backend integration and complete end-to-end testing are still in progress.
+The application supports contract and work-log uploads, Gemini-powered analysis, PayPal invoice creation and sending, invoice tracking, and PayPal dispute retrieval and analysis.
 
+The backend includes PayPal webhook signature verification, duplicate-event protection, and SQLite-based invoice status tracking.
+
+The final end-to-end PAID payment test using a PayPal Sandbox Personal buyer account is pending.
+
+The project uses PayPal Sandbox and is intended for hackathon demonstration.
 ## Future Improvements
 
-- Complete frontend-backend integration.
-- Improve the user dashboard and invoice tracking experience.
-- Add more comprehensive automated tests.
-- Test dispute analysis with real Sandbox dispute records.
-- Improve error handling and validation.
+- Expand automated testing across frontend and backend workflows.
+- Test dispute analysis with additional PayPal Sandbox dispute records.
+- Improve error handling and input validation.
+- Enhance invoice tracking and reporting.
 - Prepare the application for secure production deployment.
 
 ## Disclaimer
