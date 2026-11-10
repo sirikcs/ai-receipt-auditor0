@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
@@ -38,47 +39,13 @@ import "./App.css";
 
 const API_URL = "http://127.0.0.1:5000";
 
-// Format all dashboard amounts in US Dollars.
+// Format dashboard amounts in US Dollars.
 const formatUSD = (amount) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 0,
-  }).format(amount);
-
-// Illustrative sample chart data.
-// This is not connected to actual invoice earnings.
-const earningsData = [
-  { month: "Jun", earnings: 42000 },
-  { month: "Jul", earnings: 58000 },
-  { month: "Aug", earnings: 51000 },
-  { month: "Sep", earnings: 76000 },
-  { month: "Oct", earnings: 68000 },
-  { month: "Nov", earnings: 92000 },
-];
-
-// Illustrative sample audit activity.
-// Replace with real audit history when a backend endpoint is available.
-const activities = [
-  {
-    name: "Website Development",
-    client: "Aarav Technologies",
-    time: "Sample activity",
-    status: "Completed",
-  },
-  {
-    name: "UI/UX Design Project",
-    client: "Pixel Studio",
-    time: "Sample activity",
-    status: "Review",
-  },
-  {
-    name: "Mobile App Development",
-    client: "Nexa Solutions",
-    time: "Sample activity",
-    status: "Completed",
-  },
-];
+  }).format(amount || 0);
 
 const navigation = [
   { name: "Dashboard", icon: LayoutDashboard },
@@ -124,11 +91,18 @@ function getInvoiceStatus(invoice) {
   return invoiceStatus || paymentStatus || "Unknown";
 }
 
-function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
+function Dashboard({
+  onCreateAudit,
+  onViewInvoices,
+  onViewAudits,
+  auditCount,
+}) {
   const [dashboardInvoices, setDashboardInvoices] = useState([]);
   const [loadingInvoices, setLoadingInvoices] = useState(true);
   const [invoiceLoadError, setInvoiceLoadError] = useState("");
+  const [chartPeriod, setChartPeriod] = useState("6");
 
+  // Load actual invoices from the backend.
   useEffect(() => {
     const loadDashboardInvoices = async () => {
       try {
@@ -158,7 +132,7 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
     loadDashboardInvoices();
   }, []);
 
-  // Calculate actual earnings from paid invoices.
+  // Calculate total earnings from paid invoices.
   const totalEarnings = dashboardInvoices
     .filter((invoice) => {
       const invoiceStatus = String(
@@ -217,6 +191,70 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
     })
     .slice(0, 3);
 
+  // Build the earnings chart from actual paid invoices.
+  const earningsData = (() => {
+    const monthsToShow = Number(chartPeriod);
+    const now = new Date();
+    const months = [];
+    const monthMap = new Map();
+
+    for (let i = monthsToShow - 1; i >= 0; i--) {
+      const date = new Date(
+        now.getFullYear(),
+        now.getMonth() - i,
+        1
+      );
+
+      const key = `${date.getFullYear()}-${String(
+        date.getMonth() + 1
+      ).padStart(2, "0")}`;
+
+      const entry = {
+        month: date.toLocaleDateString("en-US", {
+          month: "short",
+          year: "2-digit",
+        }),
+        earnings: 0,
+      };
+
+      months.push(entry);
+      monthMap.set(key, entry);
+    }
+
+    dashboardInvoices.forEach((invoice) => {
+      const paid =
+        String(invoice.payment_status || "").toUpperCase() === "PAID" ||
+        String(invoice.invoice_status || "").toUpperCase() === "PAID";
+
+      if (!paid) return;
+
+      const date = new Date(
+        invoice.created_at ||
+        invoice.issue_date ||
+        invoice.date
+      );
+
+      if (Number.isNaN(date.getTime())) return;
+
+      const key = `${date.getFullYear()}-${String(
+        date.getMonth() + 1
+      ).padStart(2, "0")}`;
+
+      const month = monthMap.get(key);
+
+      if (month) {
+        month.earnings += Number(invoice.amount || 0);
+      }
+    });
+
+    return months;
+  })();
+
+  const chartEarningsTotal = earningsData.reduce(
+    (sum, month) => sum + month.earnings,
+    0
+  );
+
   return (
     <>
       <div className="welcome-section">
@@ -248,7 +286,9 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
           </div>
 
           <h2>
-            {loadingInvoices ? "Loading..." : formatUSD(totalEarnings)}
+            {loadingInvoices
+              ? "Loading..."
+              : formatUSD(totalEarnings)}
           </h2>
 
           <p className="neutral">From paid invoices</p>
@@ -263,7 +303,9 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
           </div>
 
           <h2>
-            {loadingInvoices ? "Loading..." : formatUSD(pendingPayments)}
+            {loadingInvoices
+              ? "Loading..."
+              : formatUSD(pendingPayments)}
           </h2>
 
           <p className="neutral">
@@ -294,8 +336,9 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
             </span>
           </div>
 
-          <h2>N/A</h2>
-          <p className="neutral">Audit history not connected</p>
+          <h2>{auditCount}</h2>
+
+          <p className="neutral">Completed this session</p>
         </div>
       </div>
 
@@ -308,88 +351,116 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
 
       {/* Dashboard Charts and Activity */}
       <div className="dashboard-grid">
+
+        {/* Actual Earnings Chart */}
         <section className="panel earnings-panel">
           <div className="panel-heading">
             <div>
               <h3>Earnings Overview</h3>
-              <p>Illustrative sample earnings trend</p>
+              <p>Based on actual paid invoices</p>
             </div>
 
-            <select className="period-select" defaultValue="6">
+            <select
+              className="period-select"
+              value={chartPeriod}
+              onChange={(e) => setChartPeriod(e.target.value)}
+            >
               <option value="6">Last 6 months</option>
               <option value="12">Last 12 months</option>
             </select>
           </div>
 
           <div className="chart-summary">
-            <h2>Sample Data</h2>
-            <span className="neutral">Not connected to invoices</span>
+            <h2>
+              {loadingInvoices
+                ? "Loading..."
+                : formatUSD(chartEarningsTotal)}
+            </h2>
+
+            <span className="neutral">
+              Paid earnings in selected period
+            </span>
           </div>
 
           <div className="chart-container">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={earningsData}>
-                <defs>
-                  <linearGradient
-                    id="earningsFill"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="0%"
-                      stopColor="#2673e8"
-                      stopOpacity={0.25}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor="#2673e8"
-                      stopOpacity={0}
-                    />
-                  </linearGradient>
-                </defs>
+            {loadingInvoices ? (
+              <p className="neutral">
+                Loading earnings data...
+              </p>
+            ) : invoiceLoadError ? (
+              <p className="neutral">
+                Earnings data could not be loaded.
+              </p>
+            ) : chartEarningsTotal === 0 ? (
+              <p className="neutral">
+                No paid invoice earnings recorded in this period yet.
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={earningsData}>
+                  <defs>
+                    <linearGradient
+                      id="earningsFill"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset="0%"
+                        stopColor="#2673e8"
+                        stopOpacity={0.25}
+                      />
+                      <stop
+                        offset="100%"
+                        stopColor="#2673e8"
+                        stopOpacity={0}
+                      />
+                    </linearGradient>
+                  </defs>
 
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  vertical={false}
-                  stroke="#edf0f5"
-                />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke="#edf0f5"
+                  />
 
-                <XAxis
-                  dataKey="month"
-                  axisLine={false}
-                  tickLine={false}
-                />
+                  <XAxis
+                    dataKey="month"
+                    axisLine={false}
+                    tickLine={false}
+                  />
 
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(value) => `$${value / 1000}k`}
-                  width={55}
-                />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(value) => `$${value / 1000}k`}
+                    width={55}
+                  />
 
-                <Tooltip
-                  formatter={(value) => formatUSD(Number(value))}
-                />
+                  <Tooltip
+                    formatter={(value) => formatUSD(Number(value))}
+                  />
 
-                <Area
-                  type="monotone"
-                  dataKey="earnings"
-                  stroke="#2673e8"
-                  strokeWidth={3}
-                  fill="url(#earningsFill)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+                  <Area
+                    type="monotone"
+                    dataKey="earnings"
+                    stroke="#2673e8"
+                    strokeWidth={3}
+                    fill="url(#earningsFill)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </section>
 
+        {/* Actual Audit Activity - No Fake Records */}
         <section className="panel activity-panel">
           <div className="panel-heading">
             <div>
-              <h3>Sample AI Audit Activity</h3>
-              <p>Illustrative activity only</p>
+              <h3>AI Audit Activity</h3>
+              <p>Recent audit history</p>
             </div>
 
             <button
@@ -401,27 +472,23 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
           </div>
 
           <div className="activity-list">
-            {activities.map((item, index) => (
-              <div className="activity-item" key={index}>
-                <div className="activity-icon">
-                  <BrainCircuit size={19} />
-                </div>
-
-                <div className="activity-info">
-                  <strong>{item.name}</strong>
-                  <span>{item.client}</span>
-                  <small>{item.time}</small>
-                </div>
-
-                <span
-                  className={`activity-status ${
-                    item.status === "Completed" ? "completed" : "review"
-                  }`}
-                >
-                  {item.status}
-                </span>
+            <div className="activity-item">
+              <div className="activity-icon">
+                <BrainCircuit size={19} />
               </div>
-            ))}
+
+              <div className="activity-info">
+                <strong>No saved audit history yet</strong>
+
+                <span>
+                  Completed audits are counted during the current session.
+                </span>
+
+                <small>
+                  Permanent audit history is not connected yet.
+                </small>
+              </div>
+            </div>
           </div>
         </section>
       </div>
@@ -463,6 +530,15 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
                     style={{ textAlign: "center", padding: "24px" }}
                   >
                     Loading invoices...
+                  </td>
+                </tr>
+              ) : invoiceLoadError ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    style={{ textAlign: "center", padding: "24px" }}
+                  >
+                    Unable to load invoices.
                   </td>
                 </tr>
               ) : recentInvoices.length === 0 ? (
@@ -548,8 +624,10 @@ function Dashboard({ onCreateAudit, onViewInvoices, onViewAudits }) {
 
       <p className="demo-note">
         <CircleAlert size={14} />
-        Dashboard statistics and invoice list use backend invoice data.
-        The earnings chart and AI audit activity are illustrative sample data.
+        Dashboard statistics and earnings chart use actual backend
+        invoice data. The AI audit count tracks successful audits
+        during the current session. Permanent audit history is
+        not connected yet.
       </p>
     </>
   );
@@ -577,6 +655,9 @@ export default function App() {
   const [activePage, setActivePage] = useState("Dashboard");
   const [mobileMenu, setMobileMenu] = useState(false);
   const [auditResult, setAuditResult] = useState(null);
+
+  // Tracks successful audits completed during this app session.
+  const [auditCount, setAuditCount] = useState(0);
 
   return (
     <div className="app-layout">
@@ -689,11 +770,13 @@ export default function App() {
               onCreateAudit={() => setActivePage("New AI Audit")}
               onViewInvoices={() => setActivePage("Invoices & Payments")}
               onViewAudits={() => setActivePage("Audit Reports")}
+              auditCount={auditCount}
             />
           ) : activePage === "New AI Audit" ? (
             <NewAudit
               onComplete={(data) => {
                 setAuditResult(data);
+                setAuditCount((previousCount) => previousCount + 1);
                 setActivePage("Audit Reports");
               }}
             />

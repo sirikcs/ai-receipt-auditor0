@@ -1,4 +1,7 @@
 
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import {
   BrainCircuit,
   CheckCircle2,
@@ -12,27 +15,57 @@ import {
 } from "lucide-react";
 
 export default function AuditResults({ result, onContinue }) {
+  // Read values from the backend response.
   const actualHours = result?.worklog_summary?.actual_hours;
-  const estimatedHours = result?.worklog_summary?.estimated_hours;
-  const agreedAmount = result?.payment_summary?.agreed_amount;
-  const currency = result?.payment_summary?.currency;
+
+  const estimatedHours =
+    result?.worklog_summary?.estimated_hours ??
+    result?.contract_details?.estimated_hours;
+
+  const agreedAmount =
+    result?.payment_summary?.agreed_amount ??
+    result?.contract_details?.agreed_amount;
+
+  const currency =
+    result?.payment_summary?.currency ||
+    result?.contract_details?.currency ||
+    "USD";
 
   const aiText = result?.ai_analysis || result?.analysis;
+
+  // Calculate the hours difference only when both values exist.
+  const hoursDifference =
+    result?.worklog_summary?.hours_difference ??
+    (actualHours != null && estimatedHours != null
+      ? Number(actualHours) - Number(estimatedHours)
+      : null);
+
+  const formatHours = (hours) => {
+    if (hours == null || !Number.isFinite(Number(hours))) {
+      return "Not available";
+    }
+
+    return Number(hours).toLocaleString("en-US", {
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const formatAmount = (amount) => {
+    if (amount == null || !Number.isFinite(Number(amount))) {
+      return "Not available";
+    }
+
+    return `${currency} ${Number(amount).toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
 
   const actual = Number(actualHours ?? 0);
   const estimated = Number(estimatedHours ?? 0);
   const maxHours = Math.max(actual, estimated, 1);
 
-  const hoursDifference =
-    result?.worklog_summary?.hours_difference ??
-    (actualHours != null && estimatedHours != null
-      ? actual - estimated
-      : null);
-
-  const formatAmount = (amount) => {
-    if (amount == null) return "N/A";
-    return `${currency || ""} ${amount}`;
-  };
+  const hasHoursDifference = hoursDifference != null;
 
   return (
     <div className="results-page">
@@ -49,6 +82,7 @@ export default function AuditResults({ result, onContinue }) {
         <div className="success-icon">
           <CheckCircle2 size={24} />
         </div>
+
         <div>
           <strong>Audit completed successfully</strong>
           <p>
@@ -59,20 +93,23 @@ export default function AuditResults({ result, onContinue }) {
       </div>
 
       <section className="score-section">
+
         <div className="score-card">
           <p className="result-label">HOURS DIFFERENCE</p>
 
           <div className="score-circle">
             <div>
               <strong>
-                {hoursDifference ?? "N/A"}
+                {hasHoursDifference
+                  ? formatHours(hoursDifference)
+                  : "—"}
               </strong>
               <span>hrs</span>
             </div>
           </div>
 
           <span className="score-rating">
-            {hoursDifference == null
+            {!hasHoursDifference
               ? "Not available"
               : hoursDifference <= 0
                 ? "Within Estimate"
@@ -91,6 +128,7 @@ export default function AuditResults({ result, onContinue }) {
             <div className="result-stat-icon blue">
               <FileText />
             </div>
+
             <div>
               <span>Agreed Project Amount</span>
               <strong>{formatAmount(agreedAmount)}</strong>
@@ -101,9 +139,10 @@ export default function AuditResults({ result, onContinue }) {
             <div className="result-stat-icon green">
               <TrendingUp />
             </div>
+
             <div>
               <span>Estimated Fair Value</span>
-              <strong>N/A</strong>
+              <strong>Not calculated</strong>
             </div>
           </div>
 
@@ -111,9 +150,12 @@ export default function AuditResults({ result, onContinue }) {
             <div className="result-stat-icon purple">
               <Clock />
             </div>
+
             <div>
               <span>Recorded Work Hours</span>
-              <strong>{actualHours ?? "N/A"} Hours</strong>
+              <strong>
+                {formatHours(actualHours)} Hours
+              </strong>
             </div>
           </div>
 
@@ -121,9 +163,12 @@ export default function AuditResults({ result, onContinue }) {
             <div className="result-stat-icon orange">
               <FileText />
             </div>
+
             <div>
               <span>Estimated Work Hours</span>
-              <strong>{estimatedHours ?? "N/A"} Hours</strong>
+              <strong>
+                {formatHours(estimatedHours)} Hours
+              </strong>
             </div>
           </div>
 
@@ -139,6 +184,7 @@ export default function AuditResults({ result, onContinue }) {
               <h3>Payment Analysis</h3>
               <p>Payment information extracted from the audit</p>
             </div>
+
             <FileText size={20} />
           </div>
 
@@ -150,20 +196,21 @@ export default function AuditResults({ result, onContinue }) {
 
             <div>
               <span>Estimated Fair Value</span>
-              <strong>N/A</strong>
+              <strong>Not calculated</strong>
             </div>
           </div>
 
           <div className="difference-box">
             <div>
               <span>Estimated Difference</span>
-              <strong>N/A</strong>
+              <strong>Not calculated</strong>
             </div>
           </div>
 
           <p className="result-footnote">
-            An estimated fair value and payment difference are
-            not available in the current audit response.
+            Fair value and payment difference are not calculated
+            by the current backend. No financial estimate is
+            displayed without a verified calculation.
           </p>
 
         </div>
@@ -175,6 +222,7 @@ export default function AuditResults({ result, onContinue }) {
               <h3>Work Hours Analysis</h3>
               <p>Recorded versus estimated project time</p>
             </div>
+
             <Clock size={20} />
           </div>
 
@@ -183,14 +231,17 @@ export default function AuditResults({ result, onContinue }) {
             <div className="hours-item">
               <div className="hours-label">
                 <span>Recorded Hours</span>
-                <strong>{actualHours ?? "N/A"} hrs</strong>
+                <strong>{formatHours(actualHours)} hrs</strong>
               </div>
 
               <div className="hours-track">
                 <div
                   className="hours-fill recorded-fill"
                   style={{
-                    width: `${(actual / maxHours) * 100}%`,
+                    width:
+                      actualHours != null
+                        ? `${(actual / maxHours) * 100}%`
+                        : "0%",
                   }}
                 ></div>
               </div>
@@ -199,14 +250,17 @@ export default function AuditResults({ result, onContinue }) {
             <div className="hours-item">
               <div className="hours-label">
                 <span>Estimated Hours</span>
-                <strong>{estimatedHours ?? "N/A"} hrs</strong>
+                <strong>{formatHours(estimatedHours)} hrs</strong>
               </div>
 
               <div className="hours-track">
                 <div
                   className="hours-fill estimated-fill"
                   style={{
-                    width: `${(estimated / maxHours) * 100}%`,
+                    width:
+                      estimatedHours != null
+                        ? `${(estimated / maxHours) * 100}%`
+                        : "0%",
                   }}
                 ></div>
               </div>
@@ -216,9 +270,10 @@ export default function AuditResults({ result, onContinue }) {
 
           <div className="hours-note">
             <CheckCircle2 size={17} />
+
             {actualHours != null && estimatedHours != null
               ? "Recorded and estimated work hours are displayed for comparison."
-              : "Work-hour information is incomplete in the audit response."}
+              : "Some work-hour information is missing from the audit response."}
           </div>
 
         </div>
@@ -232,17 +287,21 @@ export default function AuditResults({ result, onContinue }) {
               <h3>AI Analysis</h3>
               <p>Analysis returned by the backend</p>
             </div>
+
             <BrainCircuit size={22} />
           </div>
 
           <div
+            className="ai-markdown-content"
             style={{
-              whiteSpace: "pre-wrap",
-              lineHeight: 1.6,
+              lineHeight: 1.7,
               padding: "8px 4px",
+              overflowWrap: "anywhere",
             }}
           >
-            {aiText}
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {String(aiText)}
+            </ReactMarkdown>
           </div>
         </section>
       )}
@@ -254,6 +313,7 @@ export default function AuditResults({ result, onContinue }) {
             <h3>Project Review Checklist</h3>
             <p>Things to verify before creating an invoice</p>
           </div>
+
           <BrainCircuit size={22} />
         </div>
 
@@ -261,6 +321,7 @@ export default function AuditResults({ result, onContinue }) {
           <div className="recommendation-icon green">
             <ShieldCheck size={19} />
           </div>
+
           <div>
             <strong>Keep project documentation</strong>
             <p>
@@ -274,6 +335,7 @@ export default function AuditResults({ result, onContinue }) {
           <div className="recommendation-icon blue">
             <Lightbulb size={19} />
           </div>
+
           <div>
             <strong>Review the audit results</strong>
             <p>
@@ -287,6 +349,7 @@ export default function AuditResults({ result, onContinue }) {
           <div className="recommendation-icon orange">
             <AlertCircle size={19} />
           </div>
+
           <div>
             <strong>Confirm additional work</strong>
             <p>
@@ -301,7 +364,7 @@ export default function AuditResults({ result, onContinue }) {
       <div className="results-footer">
         <span>
           <ShieldCheck size={15} />
-          AI-generated estimates require human review.
+          AI-generated analysis requires human review.
         </span>
 
         <button

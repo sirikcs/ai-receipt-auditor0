@@ -314,9 +314,7 @@ export default function Invoices() {
         <div className="paypal-payment-content">
           <h3>PayPal Payment Tracking</h3>
           <p>
-            Monitor payments received from clients. PayPal transaction
-            references and verified payment status will appear here
-            once the payment service is connected.
+            Monitor payments received from clients. Payment status and PayPal transaction references will appear here when payments are processed and confirmed through PayPal Sandbox.
           </p>
         </div>
 
